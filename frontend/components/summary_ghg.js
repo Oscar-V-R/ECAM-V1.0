@@ -17,9 +17,9 @@ let summary_ghg=new Vue({
     sfd_image_dataurl:null,
     sfd_view_mode:"both",
 
-    // SFD persistence + comparison
-    sfd_panel:\"normal\", // normal | future | compare
-    sfd_context_key:\"\",  // e.g. city/assessment name
+    // SFD persistence + scenario compare
+    sfd_assessment_key:\"\",
+    sfd_subview:\"normal\", // normal | future | compare
     sfd_baseline_snapshot:null,
     sfd_future_snapshot:null,
 
@@ -147,91 +147,117 @@ let summary_ghg=new Vue({
     },
 
 
-    // --- SFD persistence (localStorage) ---
-    sfd_storage_prefix(){
-      // keep stable prefix across app
-      const base = (this.sfd_context_key || "").trim() || "default";
-      return `ecam_sfd:${base}`;
+    // --- SFD persistence helpers ---
+    normalize_sfd_key(){
+      return (this.sfd_assessment_key||"").trim();
     },
-    sfd_storage_key(kind){
-      return `${this.sfd_storage_prefix()}:${kind}`;
+    storage_key(kind){
+      const k = this.normalize_sfd_key();
+      if(!k) return null;
+      return `ecam_sfd:${k}:${kind}`;
     },
-    sfd_save_image(){
+    snapshot_key(kind){
+      const k = this.normalize_sfd_key();
+      if(!k) return null;
+      return `ecam_sfd_snapshot:${k}:${kind}`;
+    },
+    save_sfd_image(kind){
+      const sk = this.storage_key(kind);
+      if(!sk){
+        alert("Set an assessment key first (e.g., Zaragoza).");
+        return;
+      }
       if(!this.sfd_image_dataurl){
-        alert("No SFD image to save.");
+        alert("Upload an SFD image first.");
         return;
       }
       try{
-        localStorage.setItem(this.sfd_storage_key("image"), this.sfd_image_dataurl);
-        alert("SFD image saved for this key.");
+        localStorage.setItem(sk, this.sfd_image_dataurl);
+        alert("SFD image saved.");
       }catch(e){
         console.error(e);
-        alert("Could not save image (storage full?).");
+        alert("Could not save SFD image (storage full or blocked).");
       }
     },
-    sfd_load_image(){
+    load_sfd_image(kind){
+      const sk = this.storage_key(kind);
+      if(!sk){
+        alert("Set an assessment key first (e.g., Zaragoza).");
+        return;
+      }
       try{
-        const v = localStorage.getItem(this.sfd_storage_key("image"));
-        if(v){
-          this.sfd_image_dataurl = v;
-          this.$nextTick(()=>this.draw_sfd_charts());
+        const v = localStorage.getItem(sk);
+        if(!v){
+          alert("No saved SFD image for this key.");
           return;
         }
-        alert("No saved SFD image for this key.");
+        this.sfd_image_dataurl = v;
+        this.$nextTick(()=>this.draw_sfd_charts());
       }catch(e){
         console.error(e);
-        alert("Could not load image.");
+        alert("Could not load SFD image.");
       }
     },
-    sfd_save_snapshot(kind){
-      // kind: baseline | future
+    clear_saved_sfd(kind){
+      const sk = this.storage_key(kind);
+      if(!sk){
+        alert("Set an assessment key first.");
+        return;
+      }
       try{
-        const snap = {
-          kind,
-          unit: this.current_unit_ghg,
+        localStorage.removeItem(sk);
+        alert("Saved SFD image removed.");
+      }catch(e){
+        console.error(e);
+        alert("Could not remove saved SFD image.");
+      }
+    },
+    save_snapshot(kind){
+      const sk = this.snapshot_key(kind);
+      if(!sk){
+        alert("Set an assessment key first (e.g., Zaragoza).");
+        return;
+      }
+      try{
+        const payload = {
           ts: Date.now(),
+          unit: this.current_unit_ghg,
           emissions: this.get_sfd_emissions(),
         };
-        localStorage.setItem(this.sfd_storage_key(`snapshot:${kind}`), JSON.stringify(snap));
-        if(kind==="baseline") this.sfd_baseline_snapshot = snap;
-        if(kind==="future") this.sfd_future_snapshot = snap;
-        alert(`Saved ${kind} snapshot for this key.`);
+        localStorage.setItem(sk, JSON.stringify(payload));
+        if(kind==="baseline") this.sfd_baseline_snapshot = payload;
+        if(kind==="future") this.sfd_future_snapshot = payload;
+        alert("Snapshot saved.");
       }catch(e){
         console.error(e);
-        alert("Could not save snapshot (storage full?).");
+        alert("Could not save snapshot.");
       }
     },
-    sfd_load_snapshot(kind){
+    load_snapshots(){
+      const kb = this.snapshot_key("baseline");
+      const kf = this.snapshot_key("future");
       try{
-        const raw = localStorage.getItem(this.sfd_storage_key(`snapshot:${kind}`));
-        if(!raw) return null;
-        const snap = JSON.parse(raw);
-        if(kind==="baseline") this.sfd_baseline_snapshot = snap;
-        if(kind==="future") this.sfd_future_snapshot = snap;
-        return snap;
-      }catch(e){
-        console.error(e);
-        return null;
-      }
+        this.sfd_baseline_snapshot = kb ? JSON.parse(localStorage.getItem(kb)||"null") : null;
+      }catch(e){ this.sfd_baseline_snapshot=null; }
+      try{
+        this.sfd_future_snapshot = kf ? JSON.parse(localStorage.getItem(kf)||"null") : null;
+      }catch(e){ this.sfd_future_snapshot=null; }
     },
-    sfd_refresh_snapshots(){
-      this.sfd_load_snapshot("baseline");
-      this.sfd_load_snapshot("future");
+    clear_snapshots(){
+      const kb = this.snapshot_key("baseline");
+      const kf = this.snapshot_key("future");
+      try{ if(kb) localStorage.removeItem(kb); }catch(e){}
+      try{ if(kf) localStorage.removeItem(kf); }catch(e){}
+      this.sfd_baseline_snapshot=null;
+      this.sfd_future_snapshot=null;
+      alert("Snapshots cleared.");
     },
-    sfd_compare_rows(){
-      const b = this.sfd_baseline_snapshot ? this.sfd_baseline_snapshot.emissions : null;
-      const f = this.sfd_future_snapshot ? this.sfd_future_snapshot.emissions : null;
-      const row = (label, bv, fv)=>{
-        const d = (fv||0) - (bv||0);
-        const p = (bv && bv!==0) ? (100*d/bv) : null;
-        return { label, bv: bv||0, fv: fv||0, d, p };
-      };
-      if(!b || !f) return [];
-      return [
-        row("Offsite total", b.offsite.total, f.offsite.total),
-        row("Onsite total",  b.onsite.total,  f.onsite.total),
-        row("Grand total",   (b.offsite.total+b.onsite.total), (f.offsite.total+f.onsite.total)),
-      ];
+    compare_val(b,f){
+      const base = (typeof b==="number") ? b : 0;
+      const fut  = (typeof f==="number") ? f : 0;
+      const d = fut - base;
+      const p = base!==0 ? (100*d/base) : null;
+      return { base, fut, d, p };
     },
 
 
@@ -589,8 +615,12 @@ get_sfd_emissions(){
   },
 
   watch:{
+    sfd_assessment_key(){
+      try{ this.load_snapshots(); }catch(e){}
+    },
+
     current_view(newV){
-      this.$nextTick(()=>{ try{ if(newV==='sfd'){ this.sfd_refresh_snapshots(); this.draw_sfd_charts(); } }catch(e){} });
+      this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
     }
   },
 
@@ -1148,92 +1178,155 @@ get_sfd_emissions(){
         <!--SFD-->
         <div v-if="current_view=='sfd'">
           <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
-            <div style="display:flex;gap:1em;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+            <div style="display:flex;gap:.75em;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:.75em;">
               <div style="display:flex;gap:.75em;align-items:center;flex-wrap:wrap;">
                 <b>SFD</b>
-                <label style="font-size:.9em;color:#555;">
-                  Key:
-                  <input v-model="sfd_context_key" placeholder="e.g. Zaragoza" style="margin-left:.4em; padding:.35em .5em; border:1px solid #ccc; border-radius:4px; min-width:220px;">
-                </label>
-                <button type="button" @click.prevent="sfd_load_image()">Load SFD</button>
-                <button type="button" @click.prevent="sfd_save_image()" :disabled="!sfd_image_dataurl">Save SFD</button>
+                <span style="color:#666;font-size:.9em;">Assessment key:</span>
+                <input v-model="sfd_assessment_key" placeholder="e.g., Zaragoza" style="padding:.35em .5em;border:1px solid #ccc;border-radius:4px;min-width:220px;">
+                <button type="button" @click.prevent="load_snapshots()">Load snapshots</button>
               </div>
 
               <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;">
-                <button type="button" @click.prevent="sfd_panel='normal'"  :selected="sfd_panel=='normal'">Normal</button>
-                <button type="button" @click.prevent="sfd_panel='future'"  :selected="sfd_panel=='future'">Future (2040)</button>
-                <button type="button" @click.prevent="sfd_panel='compare'; sfd_refresh_snapshots();" :selected="sfd_panel=='compare'">Compare</button>
-                <span style="width:12px;"></span>
+                <button type="button" @click.prevent="sfd_subview='normal'" :selected="sfd_subview=='normal'">Normal</button>
+                <button type="button" @click.prevent="sfd_subview='future'" :selected="sfd_subview=='future'">Future (2040)</button>
+                <button type="button" @click.prevent="sfd_subview='compare'" :selected="sfd_subview=='compare'">Compare</button>
                 <button type="button" @click.prevent="download_sfd_jpg()">Download JPG</button>
               </div>
             </div>
 
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap; margin-top:.75em;">
+            <div v-if="sfd_subview!='compare'" style="display:flex;align-items:flex-end;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
-                <b>Upload SFD graphic</b><br>
-                <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
-                <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
+                <div style="font-weight:700;margin-bottom:.25em;">
+                  {{ sfd_subview=='normal' ? 'Baseline / Normal' : 'Future (2040)' }}
+                </div>
+                <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:center;">
+                  <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
+                  <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()">Remove</button>
+
+                  <span style="width:1px;height:24px;background:#ddd;display:inline-block;"></span>
+
+                  <button type="button" @click.prevent="load_sfd_image(sfd_subview=='normal'?'baseline':'future')">Load SFD</button>
+                  <button type="button" @click.prevent="save_sfd_image(sfd_subview=='normal'?'baseline':'future')">Save SFD</button>
+                  <button type="button" @click.prevent="clear_saved_sfd(sfd_subview=='normal'?'baseline':'future')">Clear saved SFD</button>
+
+                  <span style="width:1px;height:24px;background:#ddd;display:inline-block;"></span>
+
+                  <button type="button" @click.prevent="save_snapshot(sfd_subview=='normal'?'baseline':'future')">
+                    Save {{sfd_subview=='normal'?'Baseline':'Future'}} snapshot
+                  </button>
+                </div>
               </div>
 
-              <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;">
-                <button type="button" @click.prevent="sfd_save_snapshot('baseline')">Save Baseline</button>
-                <button type="button" @click.prevent="sfd_save_snapshot('future')">Save Future (2040)</button>
-                <span style="color:#666; font-size:.9em;">
-                  Tip: open the ECAM JSON you want (baseline or 2040), then click Save.
-                </span>
+              <div style="color:#666;font-size:.9em;">
+                Saved snapshots:
+                <span :style="{fontWeight:sfd_baseline_snapshot?'700':'400'}">Baseline</span> /
+                <span :style="{fontWeight:sfd_future_snapshot?'700':'400'}">Future</span>
+                <button type="button" style="margin-left:.5em;" @click.prevent="clear_snapshots()">Clear snapshots</button>
+              </div>
+            </div>
+
+            <div v-else style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
+              <div style="color:#444;">
+                Compare uses saved snapshots (Baseline + Future). Export will capture this view too.
+              </div>
+              <div>
+                <button type="button" @click.prevent="clear_snapshots()">Clear snapshots</button>
               </div>
             </div>
           </div>
 
+          <!-- EXPORT AREA: captured 1:1 to JPG -->
           <div id="sfd_export_area" style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start;">
             <div class="chart_container">
-              <div class="chart_title">Emissions summary <span style="font-size:.9em;color:#666;font-weight:normal;">— {{sfd_panel=='compare'?'Comparison view':(sfd_panel=='future'?'Future (2040)':'Normal')}}</span></div>
-
-              <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center; margin-top:1em;">
-                <div>
-                  <b>OFFSITE SANITATION</b>
-                  <table class="legend" style="width:100%; margin-top:.5em;">
-                    <tr><td>Collection</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Collection)}}</b> ({{current_unit_ghg}})</td></tr>
-                    <tr><td>Transport</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Transport)}}</b> ({{current_unit_ghg}})</td></tr>
-                    <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
-                    <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
-                  </table>
-                </div>
-                <div><div id="chart_sfd_offsite"></div></div>
+              <div class="chart_title">
+                <span v-if="sfd_subview!='compare'">Emissions summary</span>
+                <span v-else>Comparison (Baseline vs Future 2040)</span>
               </div>
 
-              <hr style="border-color:#eee; margin:1.2em 0;">
-
-              <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
-                <div>
-                  <b>ONSITE SANITATION</b>
-                  <table class="legend" style="width:100%; margin-top:.5em;">
-                    <tr><td>Containment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Containment)}}</b> ({{current_unit_ghg}})</td></tr>
-                    <tr><td>Emptying</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Emptying)}}</b> ({{current_unit_ghg}})</td></tr>
-                    <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
-                    <tr><td>Discharge</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Discharge)}}</b> ({{current_unit_ghg}})</td></tr>
-                    <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
-                  </table>
+              <div v-if="sfd_subview!='compare'">
+                <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center; margin-top:1em;">
+                  <div>
+                    <b>OFFSITE SANITATION</b>
+                    <table class="legend" style="width:100%; margin-top:.5em;">
+                      <tr><td>Collection</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Collection)}}</b> ({{current_unit_ghg}})</td></tr>
+                      <tr><td>Transport</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Transport)}}</b> ({{current_unit_ghg}})</td></tr>
+                      <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
+                      <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
+                    </table>
+                  </div>
+                  <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_offsite"></div></div>
                 </div>
-                <div><div id="chart_sfd_onsite"></div></div>
+
+                <hr style="border-color:#eee; margin:1.2em 0;">
+
+                <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
+                  <div>
+                    <b>ONSITE SANITATION</b>
+                    <table class="legend" style="width:100%; margin-top:.5em;">
+                      <tr><td>Containment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Containment)}}</b> ({{current_unit_ghg}})</td></tr>
+                      <tr><td>Emptying</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Emptying)}}</b> ({{current_unit_ghg}})</td></tr>
+                      <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
+                      <tr><td>Discharge</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Discharge)}}</b> ({{current_unit_ghg}})</td></tr>
+                      <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
+                    </table>
+                  </div>
+                  <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_onsite"></div></div>
+                </div>
               </div>
 
-              <div style="margin-top:1em; color:#888; font-size:.9em;">
-                {{translate("")}}
+              <div v-else style="margin-top:1em;">
+                <div v-if="!sfd_baseline_snapshot || !sfd_future_snapshot" style="color:#888; padding:.75em; border:1px dashed #ccc;">
+                  Save both snapshots (Baseline and Future) to see comparison.
+                </div>
+
+                <div v-else>
+                  <table class="legend" style="width:100%; margin-top:.5em;">
+                    <tr>
+                      <th style="text-align:left;">Metric</th>
+                      <th style="text-align:right;">Baseline</th>
+                      <th style="text-align:right;">Future</th>
+                      <th style="text-align:right;">Δ</th>
+                      <th style="text-align:right;">Δ%</th>
+                    </tr>
+
+                    <tr v-for="row in [
+                      {k:'Offsite total', b:sfd_baseline_snapshot.emissions.offsite.total, f:sfd_future_snapshot.emissions.offsite.total},
+                      {k:'Onsite total',  b:sfd_baseline_snapshot.emissions.onsite.total,  f:sfd_future_snapshot.emissions.onsite.total},
+                      {k:'TOTAL',         b:(sfd_baseline_snapshot.emissions.offsite.total + sfd_baseline_snapshot.emissions.onsite.total),
+                                          f:(sfd_future_snapshot.emissions.offsite.total + sfd_future_snapshot.emissions.onsite.total)},
+                    ]">
+                      <td style="text-align:left;"><b>{{row.k}}</b></td>
+                      <td style="text-align:right;">{{format_emission(row.b)}}</td>
+                      <td style="text-align:right;">{{format_emission(row.f)}}</td>
+                      <td style="text-align:right;">
+                        {{format_emission(row.f-row.b)}}
+                      </td>
+                      <td style="text-align:right;">
+                        <span v-if="row.b!==0">{{format(100*(row.f-row.b)/row.b, 1)}}%</span>
+                        <span v-else>—</span>
+                      </td>
+                    </tr>
+                  </table>
+
+                  <div style="margin-top:.75em;color:#666;font-size:.9em;">
+                    Key: <b>{{normalize_sfd_key()||'—'}}</b> ·
+                    Baseline saved: <b>{{sfd_baseline_snapshot.ts ? new Date(sfd_baseline_snapshot.ts).toLocaleString() : ''}}</b> ·
+                    Future saved: <b>{{sfd_future_snapshot.ts ? new Date(sfd_future_snapshot.ts).toLocaleString() : ''}}</b>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div class="chart_container">
               <div class="chart_title">SFD graphic</div>
               <div style="margin-top:1em;">
-                <div v-if="sfd_image_dataurl">
+                <div v-if="sfd_image_dataurl && sfd_subview!='compare'">
                   <img :src="sfd_image_dataurl" style="max-width:100%; height:auto; display:block; margin:0 auto; border:1px solid #ddd;">
                 </div>
                 <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">
-                  No SFD image uploaded yet.
+                  {{ sfd_subview=='compare' ? 'Comparison view (no image shown)' : 'No SFD image uploaded yet.' }}
                 </div>
               </div>
-            </div>
             </div>
           </div>
         </div>
