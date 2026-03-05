@@ -722,58 +722,79 @@ draw_simple_pie(elId, items){
 
 
 draw_compare_pies(b,f){
-  const ids = [
-    "chart_compare_baseline_offsite","chart_compare_baseline_onsite",
-    "chart_compare_future_offsite","chart_compare_future_onsite"
-  ];
-  ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
+  // IMPORTANT: use the exact same ECAM helper as the SFD tab, so format/colors/labels match.
+  // If for any reason the helper is missing, we fail silently (do NOT break Results).
+  try{
+    const elIds = [
+      "chart_compare_baseline_offsite","chart_compare_baseline_onsite",
+      "chart_compare_future_offsite","chart_compare_future_onsite"
+    ];
+    elIds.forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
 
-  const hasChartsHelper = (typeof Charts!=="undefined" && Charts && typeof Charts.draw_pie_chart==="function");
-
-  const pct = (v, tot) => (tot>0 ? (100*Number(v||0)/tot) : 0);
-
-  const draw = (id, items, colors)=>{
-    if(hasChartsHelper){
-      // ECAM pie-chart helper expects percentages as values (0–100), same as SFD tab.
-      return Charts.draw_pie_chart(id, items, colors);
+    if(typeof Charts==="undefined" || !Charts || typeof Charts.draw_pie_chart!=="function"){
+      // no helper available -> do nothing (avoid breaking UI)
+      return;
     }
-    // Fallback: our simple SVG pie also expects raw values; we feed percentages for same look.
-    return this.draw_simple_pie(id, items);
-  };
 
-  const b_off_tot = Number(b.offsite_collection||0)+Number(b.offsite_transport||0)+Number(b.offsite_treatment||0);
-  const b_on_tot  = Number(b.onsite_containment||0)+Number(b.onsite_emptying||0)+Number(b.onsite_treatment||0)+Number(b.onsite_discharge||0);
+    const pct = (v, tot) => (tot>0 ? (100*Number(v||0)/tot) : 0);
 
-  const f_off_tot = Number(f.offsite_collection||0)+Number(f.offsite_transport||0)+Number(f.offsite_treatment||0);
-  const f_on_tot  = Number(f.onsite_containment||0)+Number(f.onsite_emptying||0)+Number(f.onsite_treatment||0)+Number(f.onsite_discharge||0);
+    const b_off_tot = Number(b.offsite_collection||0)+Number(b.offsite_transport||0)+Number(b.offsite_treatment||0);
+    const b_on_tot  = Number(b.onsite_containment||0)+Number(b.onsite_emptying||0)+Number(b.onsite_treatment||0)+Number(b.onsite_discharge||0);
 
-  // Same labels + same colors + same "percentage values" as in the SFD tab
-  draw("chart_compare_baseline_offsite", [
-    {label:"Collection", value:pct(b.offsite_collection, b_off_tot)},
-    {label:"Transport",  value:pct(b.offsite_transport,  b_off_tot)},
-    {label:"Treatment",  value:pct(b.offsite_treatment,  b_off_tot)},
-  ], ["#4f81bd", "#f79646", "#9bbb59"]);
+    const f_off_tot = Number(f.offsite_collection||0)+Number(f.offsite_transport||0)+Number(f.offsite_treatment||0);
+    const f_on_tot  = Number(f.onsite_containment||0)+Number(f.onsite_emptying||0)+Number(f.onsite_treatment||0)+Number(f.onsite_discharge||0);
 
-  draw("chart_compare_baseline_onsite", [
-    {label:"Containment", value:pct(b.onsite_containment, b_on_tot)},
-    {label:"Emptying",    value:pct(b.onsite_emptying,    b_on_tot)},
-    {label:"Treatment",   value:pct(b.onsite_treatment,   b_on_tot)},
-    {label:"Discharge",   value:pct(b.onsite_discharge,   b_on_tot)},
-  ], ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"]);
+    // Offsite (Baseline)
+    Charts.draw_pie_chart(
+      "chart_compare_baseline_offsite",
+      [
+        {label:"Collection", value:pct(b.offsite_collection, b_off_tot)},
+        {label:"Transport",  value:pct(b.offsite_transport , b_off_tot)},
+        {label:"Treatment",  value:pct(b.offsite_treatment , b_off_tot)},
+      ],
+      ["#4f81bd", "#f79646", "#9bbb59"],
+    );
 
-  draw("chart_compare_future_offsite", [
-    {label:"Collection", value:pct(f.offsite_collection, f_off_tot)},
-    {label:"Transport",  value:pct(f.offsite_transport,  f_off_tot)},
-    {label:"Treatment",  value:pct(f.offsite_treatment,  f_off_tot)},
-  ], ["#4f81bd", "#f79646", "#9bbb59"]);
+    // Onsite (Baseline)
+    Charts.draw_pie_chart(
+      "chart_compare_baseline_onsite",
+      [
+        {label:"Containment", value:pct(b.onsite_containment, b_on_tot)},
+        {label:"Emptying",    value:pct(b.onsite_emptying   , b_on_tot)},
+        {label:"Treatment",   value:pct(b.onsite_treatment  , b_on_tot)},
+        {label:"Discharge",   value:pct(b.onsite_discharge  , b_on_tot)},
+      ],
+      ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"],
+    );
 
-  draw("chart_compare_future_onsite", [
-    {label:"Containment", value:pct(f.onsite_containment, f_on_tot)},
-    {label:"Emptying",    value:pct(f.onsite_emptying,    f_on_tot)},
-    {label:"Treatment",   value:pct(f.onsite_treatment,   f_on_tot)},
-    {label:"Discharge",   value:pct(f.onsite_discharge,   f_on_tot)},
-  ], ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"]);
+    // Offsite (Future)
+    Charts.draw_pie_chart(
+      "chart_compare_future_offsite",
+      [
+        {label:"Collection", value:pct(f.offsite_collection, f_off_tot)},
+        {label:"Transport",  value:pct(f.offsite_transport , f_off_tot)},
+        {label:"Treatment",  value:pct(f.offsite_treatment , f_off_tot)},
+      ],
+      ["#4f81bd", "#f79646", "#9bbb59"],
+    );
+
+    // Onsite (Future)
+    Charts.draw_pie_chart(
+      "chart_compare_future_onsite",
+      [
+        {label:"Containment", value:pct(f.onsite_containment, f_on_tot)},
+        {label:"Emptying",    value:pct(f.onsite_emptying   , f_on_tot)},
+        {label:"Treatment",   value:pct(f.onsite_treatment  , f_on_tot)},
+        {label:"Discharge",   value:pct(f.onsite_discharge  , f_on_tot)},
+      ],
+      ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"],
+    );
+  }catch(e){
+    // never break Results
+    console.warn(e);
+  }
 },
+
 
 
     draw_sfd_charts(){
