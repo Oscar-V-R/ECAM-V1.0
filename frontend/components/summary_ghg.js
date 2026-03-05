@@ -564,11 +564,11 @@ get_sfd_emissions(){
 
       <!--select tables or charts-->
       <div style="padding:1em;border:1px solid #ccc">
-        <button @click="current_view='table'"      :selected="current_view=='table'"      >{{translate("Table")                     }}</button>
-        <button @click="current_view='charts_ghg'" :selected="current_view=='charts_ghg'" >{{translate("Charts GHG")                }}</button>
-        <button @click="current_view='charts_nrg'" :selected="current_view=='charts_nrg'" >{{translate("Charts Energy")             }}</button>
-        <button @click="current_view='charts_pop'" :selected="current_view=='charts_pop'" >{{translate("Charts Serviced population")}}</button>
-        <button type="button" @click.prevent="current_view=\'sfd\'" :selected="current_view==\'sfd\'" >SFD</button>
+        <button @click="current_view='table'"      :selected="current_view=='table'"       type="button">{{translate("Table")                     }}</button>
+        <button @click="current_view='charts_ghg'" :selected="current_view=='charts_ghg'"  type="button">{{translate("Charts GHG")                }}</button>
+        <button @click="current_view='charts_nrg'" :selected="current_view=='charts_nrg'"  type="button">{{translate("Charts Energy")             }}</button>
+        <button @click="current_view='charts_pop'" :selected="current_view=='charts_pop'"  type="button">{{translate("Charts Serviced population")}}</button>
+        <button type="button" @click.prevent="current_view='sfd'" :selected="current_view=='sfd'" >SFD</button>
         <hr style="border-color:#eee">
         <div>
           <tutorial_tip
