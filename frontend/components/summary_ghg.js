@@ -686,6 +686,41 @@ generate_compare_from_uploads(){
   }
 },
 
+draw_simple_pie(elId, items){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  const data = (items||[]).map(d=>({label:String(d.label||''), value:Number(d.value||0)})).filter(d=>d.value>0);
+  const total = data.reduce((s,d)=>s+d.value,0);
+  if(!total){ el.innerHTML = "<div style='color:#888'>No data</div>"; return; }
+  const W=180, H=180, R=70, CX=W/2, CY=H/2;
+  let a0 = -Math.PI/2;
+  const colors = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7'];
+  let paths = '';
+  data.forEach((d,i)=>{
+    const a1 = a0 + (d.value/total)*Math.PI*2;
+    const x0 = CX + R*Math.cos(a0), y0 = CY + R*Math.sin(a0);
+    const x1 = CX + R*Math.cos(a1), y1 = CY + R*Math.sin(a1);
+    const large = (a1-a0) > Math.PI ? 1 : 0;
+    const color = colors[i % colors.length];
+    const pct = Math.round((d.value/total)*100);
+    const title = `${d.label}: ${pct}%`;
+    paths += `<path d='M ${CX} ${CY} L ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} Z' fill='${color}'>`+
+             `<title>${title}</title></path>`;
+    a0 = a1;
+  });
+  const svg = `<svg width='${W}' height='${H}' viewBox='0 0 ${W} ${H}' role='img' aria-label='Pie chart'>${paths}</svg>`;
+  const legend = `<div style='font-size:12px;line-height:1.3;margin-top:6px;'>`+
+    data.map((d,i)=>{
+      const color = colors[i % colors.length];
+      const pct = Math.round((d.value/total)*100);
+      return `<div style='display:flex;align-items:center;gap:6px;margin:2px 0;'>`+
+             `<span style='display:inline-block;width:10px;height:10px;background:${color};border-radius:2px;'></span>`+
+             `<span>${d.label} (${pct}%)</span></div>`;
+    }).join('') + `</div>`;
+  el.innerHTML = `<div style='display:flex;flex-direction:column;align-items:center;'>${svg}${legend}</div>`;
+},
+
+
 draw_compare_pies(b,f){
   const ids = [
     "chart_compare_baseline_offsite","chart_compare_baseline_onsite",
@@ -693,26 +728,31 @@ draw_compare_pies(b,f){
   ];
   ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
 
-  if(!(window && window.draw_pie_chart)) return;
+  const hasHelper = (window && window.draw_pie_chart);
 
-  window.draw_pie_chart("chart_compare_baseline_offsite", [
+  const draw = (id, arr)=>{
+    if(hasHelper) return window.draw_pie_chart(id, arr);
+    return this.draw_simple_pie(id, arr);
+  };
+
+  draw("chart_compare_baseline_offsite", [
     {label:"Collection", value:b.offsite_collection},
     {label:"Transport",  value:b.offsite_transport},
     {label:"Treatment",  value:b.offsite_treatment},
   ]);
-  window.draw_pie_chart("chart_compare_baseline_onsite", [
+  draw("chart_compare_baseline_onsite", [
     {label:"Containment", value:b.onsite_containment},
     {label:"Emptying",    value:b.onsite_emptying},
     {label:"Treatment",   value:b.onsite_treatment},
     {label:"Discharge",   value:b.onsite_discharge},
   ]);
 
-  window.draw_pie_chart("chart_compare_future_offsite", [
+  draw("chart_compare_future_offsite", [
     {label:"Collection", value:f.offsite_collection},
     {label:"Transport",  value:f.offsite_transport},
     {label:"Treatment",  value:f.offsite_treatment},
   ]);
-  window.draw_pie_chart("chart_compare_future_onsite", [
+  draw("chart_compare_future_onsite", [
     {label:"Containment", value:f.onsite_containment},
     {label:"Emptying",    value:f.onsite_emptying},
     {label:"Treatment",   value:f.onsite_treatment},
