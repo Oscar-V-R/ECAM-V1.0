@@ -17,13 +17,12 @@ let summary_ghg=new Vue({
     sfd_image_dataurl:null,
 
     // --- SFD Compare (UI only) ---
-    sfd_compare_baseline_json:null,
-    sfd_compare_future_json:null,
-    sfd_compare_baseline_sfd:null,
-    sfd_compare_future_sfd:null,
-    sfd_compare_result:null,
-    sfd_compare_error:"",
-
+    compare_baseline_ecam:null,
+    compare_future_ecam:null,
+    compare_baseline_sfd:null,
+    compare_future_sfd:null,
+    compare_rows:[],
+    compare_error:"",
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
     current_unit_nrg:"kWh",
@@ -121,151 +120,166 @@ let summary_ghg=new Vue({
     // SFD tab (UI only)
     // ---------------------------
 
-    // --- Compare tab: file uploads ---
-    _read_json_file(file, cb){
-      try{
-        const reader = new FileReader();
-        reader.onload = () => {
-          try{
-            const obj = JSON.parse(String(reader.result||"{}"));
-            cb(null, obj);
-          }catch(err){
-            cb(err, null);
+    
+    // key used to store/retrieve SFD assets per assessment (municipality/scenario)
+    get_sfd_storage_key(){
+      // priority: user-provided key
+      let k = (this.sfd_assessment_key||"").trim();
+
+      // try derive from ECAM globals (best effort, no core-model changes)
+      if(!k){
+        try{
+          const G = this.Global || (typeof window!=="undefined" ? window.Global : null);
+          // attempt common metadata fields
+          const candidates = [
+            G && (G.assessment_name || G.AssessmentName || G.name || G.Name),
+            G && G.country,
+            G && G.city,
+            G && G.municipality,
+          ].filter(Boolean);
+
+          if(candidates.length){
+            k = String(candidates[0]).trim();
           }
-        };
-        reader.readAsText(file);
-      }catch(e){
-        cb(e, null);
+        }catch(e){}
+      }
+
+      // last resort
+      if(!k) k = "default";
+      return k.replace(/\s+/g," ").slice(0,120);
+    },
+
+    set_sfd_key_from_global_if_empty(){
+      if((this.sfd_assessment_key||"").trim()) return;
+      try{
+        const G = this.Global || (typeof window!=="undefined" ? window.Global : null);
+        const name = G && (G.assessment_name || G.AssessmentName || G.name || G.Name);
+        if(name) this.sfd_assessment_key = String(name).trim();
+      }catch(e){}
+    },
+
+    sfd_ls_key(type){
+      const k = this.get_sfd_storage_key();
+      return `ecam_sfd_${type}::${k}`;
+    },
+
+    sfd_set_status(msg){
+      this.sfd_status_msg = msg || "";
+      if(msg){
+        setTimeout(()=>{ try{ this.sfd_status_msg=""; }catch(e){} }, 3500);
       }
     },
 
-    load_sfd_compare_baseline_json(ev){
-      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
-      if(!file) return;
-      this._read_json_file(file, (err, obj)=>{
-        if(err){
-          this.sfd_compare_error = "Baseline JSON could not be read.";
-          this.sfd_compare_baseline_json = null;
-          return;
-        }
-        this.sfd_compare_error = "";
-        this.sfd_compare_baseline_json = obj;
-        this.sfd_compare_result = null;
-      });
-    },
-
-    load_sfd_compare_future_json(ev){
-      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
-      if(!file) return;
-      this._read_json_file(file, (err, obj)=>{
-        if(err){
-          this.sfd_compare_error = "Future JSON could not be read.";
-          this.sfd_compare_future_json = null;
-          return;
-        }
-        this.sfd_compare_error = "";
-        this.sfd_compare_future_json = obj;
-        this.sfd_compare_result = null;
-      });
-    },
-
-    load_sfd_compare_baseline_sfd(ev){
-      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
-      if(!file) return;
-      const ok = /image\/(png|jpeg)/i.test(file.type);
-      if(!ok){ alert("Please upload a PNG or JPG image."); return; }
-      const reader = new FileReader();
-      reader.onload = () => { this.sfd_compare_baseline_sfd = reader.result; };
-      reader.readAsDataURL(file);
-    },
-
-    load_sfd_compare_future_sfd(ev){
-      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
-      if(!file) return;
-      const ok = /image\/(png|jpeg)/i.test(file.type);
-      if(!ok){ alert("Please upload a PNG or JPG image."); return; }
-      const reader = new FileReader();
-      reader.onload = () => { this.sfd_compare_future_sfd = reader.result; };
-      reader.readAsDataURL(file);
-    },
-
-    // --- Compare tab: read emissions from ECAM export JSON (best-effort, UI-only) ---
-    _get_number_by_paths(obj, paths){
+    save_sfd_for_current_key(){
       try{
-        for(const p of paths){
-          let cur = obj;
-          let ok = true;
-          for(const k of p){
-            if(cur && Object.prototype.hasOwnProperty.call(cur, k)){
-              cur = cur[k];
-            }else{
-              ok = false; break;
-            }
-          }
-          if(ok && cur!==undefined && cur!==null && cur!=="" && !isNaN(Number(cur))){
-            return Number(cur);
-          }
+        const img = this.sfd_image_dataurl;
+        if(!img){
+          alert("Upload an SFD graphic first.");
+          return;
+        }
+        localStorage.setItem(this.sfd_ls_key("image"), img);
+        localStorage.setItem("ecam_sfd_last_key", this.get_sfd_storage_key());
+        this.sfd_set_status("SFD saved for this assessment.");
+      }catch(e){
+        console.warn(e);
+        alert("Could not save SFD (storage may be full).");
+      }
+    },
+
+    load_sfd_for_current_key(){
+      try{
+        const img = localStorage.getItem(this.sfd_ls_key("image"));
+        if(img){
+          this.sfd_image_dataurl = img;
+          this.$nextTick(()=>this.draw_sfd_charts());
+          this.sfd_set_status("SFD loaded.");
+        }else{
+          this.sfd_set_status("No saved SFD found for this key.");
+        }
+      }catch(e){
+        console.warn(e);
+        alert("Could not load SFD.");
+      }
+    },
+
+    auto_load_sfd_if_available(){
+      // run once per key, mainly after a JSON import refreshes window.Global
+      const k = this.get_sfd_storage_key();
+      if(this._sfd_autoload_done_for_key === k) return;
+      this._sfd_autoload_done_for_key = k;
+
+      // if user previously used a key, restore it when empty
+      try{
+        const last = localStorage.getItem("ecam_sfd_last_key");
+        if(!(this.sfd_assessment_key||"").trim() && last){
+          this.sfd_assessment_key = last;
         }
       }catch(e){}
-      return 0;
+
+      // load SFD image & snapshots if they exist
+      this.load_sfd_for_current_key();
+      this.load_sfd_snapshots_for_current_key();
     },
 
-    extract_emissions_from_ecam_json(obj){
-      // Try common locations. If your export has different keys, we can add paths without changing ECAM core.
-      const offsite_collection = this._get_number_by_paths(obj, [
-        ["offsite_collection"],
-        ["results_summary_ghg","offsite_collection"],
-        ["results","summary","ghg","offsite_collection"],
-      ]);
-      const offsite_transport = this._get_number_by_paths(obj, [
-        ["offsite_transport"],
-        ["results_summary_ghg","offsite_transport"],
-        ["results","summary","ghg","offsite_transport"],
-      ]);
-      const offsite_treatment = this._get_number_by_paths(obj, [
-        ["offsite_treatment"],
-        ["results_summary_ghg","offsite_treatment"],
-        ["results","summary","ghg","offsite_treatment"],
-      ]);
-
-      const onsite_containment = this._get_number_by_paths(obj, [
-        ["onsite_containment"],
-        ["results_summary_ghg","onsite_containment"],
-        ["results","summary","ghg","onsite_containment"],
-      ]);
-      const onsite_emptying = this._get_number_by_paths(obj, [
-        ["onsite_emptying"],
-        ["results_summary_ghg","onsite_emptying"],
-        ["results","summary","ghg","onsite_emptying"],
-      ]);
-      const onsite_treatment = this._get_number_by_paths(obj, [
-        ["onsite_treatment"],
-        ["results_summary_ghg","onsite_treatment"],
-        ["results","summary","ghg","onsite_treatment"],
-      ]);
-      const onsite_discharge = this._get_number_by_paths(obj, [
-        ["onsite_discharge"],
-        ["results_summary_ghg","onsite_discharge"],
-        ["results","summary","ghg","onsite_discharge"],
-      ]);
-
-      const baselineLike = offsite_collection+offsite_transport+offsite_treatment+onsite_containment+onsite_emptying+onsite_treatment+onsite_discharge;
+    snapshot_sfd_state(){
+      const e = this.get_sfd_emissions();
+      const unit = this.current_unit_ghg;
+      const now = new Date().toISOString();
       return {
-        offsite:{
-          Collection: offsite_collection,
-          Transport: offsite_transport,
-          Treatment: offsite_treatment,
-          total: offsite_collection+offsite_transport+offsite_treatment,
-        },
-        onsite:{
-          Containment: onsite_containment,
-          Emptying: onsite_emptying,
-          Treatment: onsite_treatment,
-          Discharge: onsite_discharge,
-          total: onsite_containment+onsite_emptying+onsite_treatment+onsite_discharge,
-        },
-        total: baselineLike,
+        key: this.get_sfd_storage_key(),
+        ts: now,
+        unit,
+        offsite: e.offsite,
+        onsite: e.onsite,
+        total: (e.offsite.total||0) + (e.onsite.total||0),
       };
+    },
+
+    save_snapshot_baseline(){
+      try{
+        const snap = this.snapshot_sfd_state();
+        localStorage.setItem(this.sfd_ls_key("baseline"), JSON.stringify(snap));
+        this.sfd_compare_baseline = snap;
+        this.sfd_set_status("Baseline saved.");
+      }catch(e){
+        console.warn(e);
+        alert("Could not save baseline snapshot.");
+      }
+    },
+
+    save_snapshot_future(){
+      try{
+        const snap = this.snapshot_sfd_state();
+        localStorage.setItem(this.sfd_ls_key("future"), JSON.stringify(snap));
+        this.sfd_compare_future = snap;
+        this.sfd_set_status("Future (2040) saved.");
+      }catch(e){
+        console.warn(e);
+        alert("Could not save future snapshot.");
+      }
+    },
+
+    load_sfd_snapshots_for_current_key(){
+      try{
+        const b = localStorage.getItem(this.sfd_ls_key("baseline"));
+        const f = localStorage.getItem(this.sfd_ls_key("future"));
+        this.sfd_compare_baseline = b ? JSON.parse(b) : null;
+        this.sfd_compare_future   = f ? JSON.parse(f) : null;
+      }catch(e){
+        console.warn(e);
+        this.sfd_compare_baseline = null;
+        this.sfd_compare_future = null;
+      }
+    },
+
+    clear_sfd_snapshots_for_current_key(){
+      try{
+        localStorage.removeItem(this.sfd_ls_key("baseline"));
+        localStorage.removeItem(this.sfd_ls_key("future"));
+      }catch(e){}
+      this.sfd_compare_baseline = null;
+      this.sfd_compare_future = null;
+      this.sfd_set_status("Comparison cleared.");
     },
 
     compare_delta(a,b){
@@ -275,37 +289,7 @@ let summary_ghg=new Vue({
       return {diff, pct};
     },
 
-    generate_sfd_comparison(){
-      this.sfd_compare_error = "";
-      this.sfd_compare_result = null;
-
-      if(!this.sfd_compare_baseline_json || !this.sfd_compare_future_json){
-        this.sfd_compare_error = "Please upload both Baseline and Future ECAM JSON files.";
-        return;
-      }
-
-      try{
-        const B = this.extract_emissions_from_ecam_json(this.sfd_compare_baseline_json);
-        const F = this.extract_emissions_from_ecam_json(this.sfd_compare_future_json);
-
-        // If all values are zero, likely paths did not match the export
-        const allZero = (B.total===0 && F.total===0);
-        if(allZero){
-          this.sfd_compare_error = "Could not find emission totals in the uploaded ECAM JSON files. Export format may differ.";
-        }
-
-        this.sfd_compare_result = {baseline:B, future:F};
-      }catch(e){
-        console.warn(e);
-        this.sfd_compare_error = "Comparison failed: invalid ECAM JSON format.";
-      }
-    },
-
-    // ---------------------------
-    // SFD image upload (current scenario)
-    // ---------------------------
-
-    on_sfd_file_change(ev){
+on_sfd_file_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target && ev.target.files ? ev.target.files[0] : null : null;
       if(!file) return;
 
@@ -329,6 +313,222 @@ let summary_ghg=new Vue({
       const b=document.getElementById("chart_sfd_onsite");
       if(a) a.innerHTML="";
       if(b) b.innerHTML="";
+
+    // --- SFD Compare (UI-only; does NOT touch ECAM calculations) ---
+    _read_json_file(file, cb){
+      try{
+        const reader = new FileReader();
+        reader.onload = () => {
+          try{
+            const parsed = JSON.parse(reader.result);
+            cb(null, parsed);
+          }catch(e){
+            cb(new Error("Invalid JSON file."));
+          }
+        };
+        reader.onerror = () => cb(new Error("Could not read file."));
+        reader.readAsText(file);
+      }catch(e){
+        cb(new Error("Could not read file."));
+      }
+    },
+
+    _read_image_file(file, cb){
+      try{
+        const ok = /image\/(png|jpeg)/i.test(file.type);
+        if(!ok) return cb(new Error("Please upload a PNG or JPG image."));
+        const reader = new FileReader();
+        reader.onload = () => cb(null, reader.result);
+        reader.onerror = () => cb(new Error("Could not read image."));
+        reader.readAsDataURL(file);
+      }catch(e){
+        cb(new Error("Could not read image."));
+      }
+    },
+
+    on_compare_baseline_json_change(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      this.compare_error="";
+      this._read_json_file(file, (err, parsed)=>{
+        if(err){ this.compare_error=err.message; return; }
+        this.compare_baseline_ecam = parsed;
+      });
+    },
+
+    on_compare_future_json_change(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      this.compare_error="";
+      this._read_json_file(file, (err, parsed)=>{
+        if(err){ this.compare_error=err.message; return; }
+        this.compare_future_ecam = parsed;
+      });
+    },
+
+    on_compare_baseline_sfd_change(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      this.compare_error="";
+      this._read_image_file(file, (err, dataurl)=>{
+        if(err){ this.compare_error=err.message; return; }
+        this.compare_baseline_sfd = dataurl;
+      });
+    },
+
+    on_compare_future_sfd_change(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      this.compare_error="";
+      this._read_image_file(file, (err, dataurl)=>{
+        if(err){ this.compare_error=err.message; return; }
+        this.compare_future_sfd = dataurl;
+      });
+    },
+
+    clear_sfd_comparison(){
+      this.compare_baseline_ecam=null;
+      this.compare_future_ecam=null;
+      this.compare_baseline_sfd=null;
+      this.compare_future_sfd=null;
+      this.compare_rows=[];
+      this.compare_error="";
+    },
+
+    _deep_find_number(obj, keys){
+      // keys: array of possible exact keys
+      const wanted = new Set(keys);
+      const seen = new Set();
+      const stack = [obj];
+
+      while(stack.length){
+        const cur = stack.pop();
+        if(cur && typeof cur === "object"){
+          if(seen.has(cur)) continue;
+          seen.add(cur);
+
+          if(!Array.isArray(cur)){
+            for(const k in cur){
+              if(!Object.prototype.hasOwnProperty.call(cur,k)) continue;
+              const v = cur[k];
+
+              if(wanted.has(k) && (typeof v === "number" || (typeof v === "string" && v.trim()!=="" && !isNaN(Number(v))))){
+                return Number(v);
+              }
+
+              if(v && typeof v === "object") stack.push(v);
+            }
+          }else{
+            for(const v of cur){
+              if(v && typeof v === "object") stack.push(v);
+            }
+          }
+        }
+      }
+      return null;
+    },
+
+    _extract_ecam_emissions_from_json(j){
+      // Try to find emissions in common ECAM export shapes (root or nested).
+      // Values expected in kg CO2eq.
+      const get = (cands)=> {
+        const v = this._deep_find_number(j, cands);
+        return v===null ? 0 : Number(v);
+      };
+
+      // common candidate keys (root or nested)
+      const out = {
+        collection: get(["offsite_collection","offsiteCollection","collection_offsite","collection"]),
+        transport : get(["offsite_transport","offsiteTransport","transport_offsite","transport"]),
+        treatment : get(["offsite_treatment","offsiteTreatment","treatment_offsite","offsite_treat"]),
+        containment: get(["onsite_containment","onsiteContainment","containment_onsite","containment"]),
+        emptying   : get(["onsite_emptying","onsiteEmptying","emptying_onsite","emptying"]),
+        onsite_treatment: get(["onsite_treatment","onsiteTreatment","treatment_onsite","onsite_treat"]),
+        discharge  : get(["onsite_discharge","onsiteDischarge","discharge_onsite","discharge"]),
+      };
+
+      out.total_offsite = out.collection + out.transport + out.treatment;
+      out.total_onsite  = out.containment + out.emptying + out.onsite_treatment + out.discharge;
+      out.total         = out.total_offsite + out.total_onsite;
+
+      // unit hint (optional)
+      const unit = (this._deep_find_number(j, ["current_unit_ghg"])===null) ? null : null; // ignore numeric
+      // If export has a textual unit field
+      const unit_str = (()=> {
+        try{
+          // best-effort look for a string unit
+          const stack=[j], seen=new Set();
+          while(stack.length){
+            const cur=stack.pop();
+            if(cur && typeof cur==="object"){
+              if(seen.has(cur)) continue;
+              seen.add(cur);
+              for(const k in cur){
+                const v=cur[k];
+                if((k==="unit"||k==="unit_ghg"||k==="current_unit_ghg") && typeof v==="string") return v;
+                if(v && typeof v==="object") stack.push(v);
+              }
+            }
+          }
+        }catch(e){}
+        return null;
+      })();
+
+      if(unit_str && /tco2/i.test(unit_str)){
+        // values are in tonnes; convert to kg for internal consistency
+        for(const k in out){
+          if(typeof out[k]==="number") out[k] = out[k]*1000;
+        }
+      }
+
+      return out;
+    },
+
+    generate_sfd_comparison(){
+      this.compare_error="";
+      this.compare_rows=[];
+
+      if(!this.compare_baseline_ecam || !this.compare_future_ecam){
+        this.compare_error="Please upload both Baseline and Future ECAM JSON files.";
+        return;
+      }
+
+      try{
+        const b = this._extract_ecam_emissions_from_json(this.compare_baseline_ecam);
+        const f = this._extract_ecam_emissions_from_json(this.compare_future_ecam);
+
+        const rowsDef = [
+          {k:"collection", label:"Offsite – Collection"},
+          {k:"transport", label:"Offsite – Transport"},
+          {k:"treatment", label:"Offsite – Treatment"},
+          {k:"total_offsite", label:"Total offsite"},
+          {k:"containment", label:"Onsite – Containment"},
+          {k:"emptying", label:"Onsite – Emptying"},
+          {k:"onsite_treatment", label:"Onsite – Treatment"},
+          {k:"discharge", label:"Onsite – Discharge"},
+          {k:"total_onsite", label:"Total onsite"},
+          {k:"total", label:"Total (offsite + onsite)"},
+        ];
+
+        this.compare_rows = rowsDef.map(r=>{
+          const bv = Number(b[r.k]||0);
+          const fv = Number(f[r.k]||0);
+          const diff = fv - bv;
+          const pct = bv!==0 ? (100*diff/bv) : null;
+          return {
+            label: r.label,
+            baseline: bv,
+            future: fv,
+            diff: diff,
+            pct_text: pct===null ? "-" : (this.format(pct,1,1) + "%"),
+          };
+        });
+      }catch(e){
+        console.warn(e);
+        this.compare_error="Could not generate comparison. Please verify the ECAM JSON exports.";
+      }
+    },
+
     },
 
     // Export SFD + results (UI only) as single JPG (EXACTLY as shown on screen)
@@ -685,10 +885,10 @@ get_sfd_emissions(){
   },
 
   watch:{
-    current_view(newV){
+current_view(newV){
       this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
     }
-  },
+},
 
   template:`
     <div id=summary_ghg v-if="visible && Languages.ready">
@@ -1244,12 +1444,12 @@ get_sfd_emissions(){
         </div>
         <!--SFD-->
         <div v-if="current_view=='sfd'">
-                    <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
-            <div style="display:flex;gap:.75em;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+                    
+          <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
                 <b>Upload SFD graphic</b><br>
                 <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
-                <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
               <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
                 <button type="button" @click.prevent="download_sfd_jpg()" :disabled="!sfd_image_dataurl">Download JPG</button>
@@ -1257,7 +1457,8 @@ get_sfd_emissions(){
             </div>
           </div>
 
-          <div id="sfd_export_area" style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start;">
+          <div id="sfd_export_area"
+ style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start;">
             <div class="chart_container">
               <div class="chart_title">Emissions summary</div>
 
@@ -1347,161 +1548,92 @@ get_sfd_emissions(){
               </div>
             </div>
           </div>
+        
         <!--SFD Compare-->
         <div v-if="current_view=='sfd_compare'">
+
           <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1em;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;">
               <div>
-                <b>Baseline scenario</b><br>
-                <div style="margin-top:.4em;">
-                  <div style="margin-bottom:.35em;">
-                    <span style="font-weight:600;">Upload ECAM JSON</span><br>
-                    <input type="file" accept=".json,application/json" @change="load_sfd_compare_baseline_json">
-                  </div>
-                  <div>
-                    <span style="font-weight:600;">Upload SFD graphic</span><br>
-                    <input type="file" accept="image/png,image/jpeg" @change="load_sfd_compare_baseline_sfd">
-                  </div>
+                <div style="font-weight:700;margin-bottom:.5em;">Baseline scenario</div>
+                <div style="margin-bottom:.6em;">
+                  <b>Upload ECAM JSON</b><br>
+                  <input type="file" accept=".json,application/json" @change="on_compare_baseline_json_change">
+                </div>
+                <div>
+                  <b>Upload SFD graphic</b><br>
+                  <input type="file" accept="image/png,image/jpeg" @change="on_compare_baseline_sfd_change">
                 </div>
               </div>
 
               <div>
-                <b>Future scenario (e.g., 2040)</b><br>
-                <div style="margin-top:.4em;">
-                  <div style="margin-bottom:.35em;">
-                    <span style="font-weight:600;">Upload ECAM JSON</span><br>
-                    <input type="file" accept=".json,application/json" @change="load_sfd_compare_future_json">
-                  </div>
-                  <div>
-                    <span style="font-weight:600;">Upload SFD graphic</span><br>
-                    <input type="file" accept="image/png,image/jpeg" @change="load_sfd_compare_future_sfd">
-                  </div>
+                <div style="font-weight:700;margin-bottom:.5em;">Future scenario (e.g., 2040)</div>
+                <div style="margin-bottom:.6em;">
+                  <b>Upload ECAM JSON</b><br>
+                  <input type="file" accept=".json,application/json" @change="on_compare_future_json_change">
+                </div>
+                <div>
+                  <b>Upload SFD graphic</b><br>
+                  <input type="file" accept="image/png,image/jpeg" @change="on_compare_future_sfd_change">
                 </div>
               </div>
             </div>
 
-            <div style="margin-top:1em; display:flex; gap:.75em; align-items:center; flex-wrap:wrap;">
-              <button type="button" @click.prevent="generate_sfd_comparison()" :disabled="!sfd_compare_baseline_json || !sfd_compare_future_json">Generate comparison</button>
-              <span v-if="sfd_compare_error" style="color:#b91c1c; font-weight:600;">{{sfd_compare_error}}</span>
+            <div style="display:flex;gap:.5em;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:1em;">
+              <button type="button" @click.prevent="generate_sfd_comparison()" :disabled="!compare_baseline_ecam || !compare_future_ecam">Generate comparison</button>
+              <button type="button" @click.prevent="clear_sfd_comparison()" :disabled="!compare_baseline_ecam && !compare_future_ecam && !compare_baseline_sfd && !compare_future_sfd && !compare_rows.length">Clear</button>
+            </div>
+
+            <div v-if="compare_error" style="margin-top:.75em;color:#b91c1c;font-weight:600;">
+              {{compare_error}}
             </div>
           </div>
 
-          <div class="chart_container" v-if="sfd_compare_result">
+          <div class="chart_container" v-if="compare_rows && compare_rows.length">
             <div class="chart_title">Comparison (Baseline vs Future)</div>
 
-            <table class="legend" style="width:100%; margin-top:1em;">
+            <table class="legend" style="width:100%;margin-top:1em;">
               <tr style="font-weight:700;">
-                <td></td>
+                <td>Component</td>
                 <td style="text-align:right;">Baseline</td>
                 <td style="text-align:right;">Future</td>
                 <td style="text-align:right;">Δ</td>
                 <td style="text-align:right;">Δ%</td>
               </tr>
 
-              <tr style="font-weight:700;"><td colspan="5" style="padding-top:.6em;">OFFSITE SANITATION</td></tr>
-              <tr>
-                <td>Collection</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.Collection)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.Collection)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.Collection, sfd_compare_result.future.offsite.Collection).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.Collection, sfd_compare_result.future.offsite.Collection).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.Collection, sfd_compare_result.future.offsite.Collection).pct,1,1)+'%'}} </td>
-              </tr>
-              <tr>
-                <td>Transport</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.Transport)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.Transport)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.Transport, sfd_compare_result.future.offsite.Transport).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.Transport, sfd_compare_result.future.offsite.Transport).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.Transport, sfd_compare_result.future.offsite.Transport).pct,1,1)+'%'}} </td>
-              </tr>
-              <tr>
-                <td>Treatment</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.Treatment)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.Treatment)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.Treatment, sfd_compare_result.future.offsite.Treatment).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.Treatment, sfd_compare_result.future.offsite.Treatment).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.Treatment, sfd_compare_result.future.offsite.Treatment).pct,1,1)+'%'}} </td>
-              </tr>
-              <tr style="font-weight:700;">
-                <td>Total offsite</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.total)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.total)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.total, sfd_compare_result.future.offsite.total).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.total, sfd_compare_result.future.offsite.total).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.total, sfd_compare_result.future.offsite.total).pct,1,1)+'%'}} </td>
-              </tr>
-
-              <tr style="font-weight:700;"><td colspan="5" style="padding-top:.9em;">ONSITE SANITATION</td></tr>
-              <tr>
-                <td>Containment</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Containment)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Containment)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Containment, sfd_compare_result.future.onsite.Containment).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Containment, sfd_compare_result.future.onsite.Containment).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Containment, sfd_compare_result.future.onsite.Containment).pct,1,1)+'%'}} </td>
-              </tr>
-              <tr>
-                <td>Emptying</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Emptying)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Emptying)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Emptying, sfd_compare_result.future.onsite.Emptying).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Emptying, sfd_compare_result.future.onsite.Emptying).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Emptying, sfd_compare_result.future.onsite.Emptying).pct,1,1)+'%'}} </td>
-              </tr>
-              <tr>
-                <td>Treatment</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Treatment)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Treatment)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Treatment, sfd_compare_result.future.onsite.Treatment).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Treatment, sfd_compare_result.future.onsite.Treatment).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Treatment, sfd_compare_result.future.onsite.Treatment).pct,1,1)+'%'}} </td>
-              </tr>
-              <tr>
-                <td>Discharge</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Discharge)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Discharge)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Discharge, sfd_compare_result.future.onsite.Discharge).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Discharge, sfd_compare_result.future.onsite.Discharge).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Discharge, sfd_compare_result.future.onsite.Discharge).pct,1,1)+'%'}} </td>
-              </tr>
-              <tr style="font-weight:700;">
-                <td>Total onsite</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.total)}}</td>
-                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.total)}}</td>
-                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.total, sfd_compare_result.future.onsite.total).diff)}}</td>
-                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.total, sfd_compare_result.future.onsite.total).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.total, sfd_compare_result.future.onsite.total).pct,1,1)+'%'}} </td>
-              </tr>
-
-              <tr style="font-weight:700;">
-                <td style="padding-top:.9em;">Total (offsite+onsite)</td>
-                <td style="text-align:right; padding-top:.9em;">{{format_emission(sfd_compare_result.baseline.total)}}</td>
-                <td style="text-align:right; padding-top:.9em;">{{format_emission(sfd_compare_result.future.total)}}</td>
-                <td style="text-align:right; padding-top:.9em;">{{format_emission(compare_delta(sfd_compare_result.baseline.total, sfd_compare_result.future.total).diff)}}</td>
-                <td style="text-align:right; padding-top:.9em;">{{compare_delta(sfd_compare_result.baseline.total, sfd_compare_result.future.total).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.total, sfd_compare_result.future.total).pct,1,1)+'%'}} </td>
+              <tr v-for="r in compare_rows">
+                <td>{{r.label}}</td>
+                <td style="text-align:right;"><b>{{format_emission(r.baseline)}}</b> ({{current_unit_ghg}})</td>
+                <td style="text-align:right;"><b>{{format_emission(r.future)}}</b> ({{current_unit_ghg}})</td>
+                <td style="text-align:right;"><b>{{format_emission(r.diff)}}</b> ({{current_unit_ghg}})</td>
+                <td style="text-align:right;"><b>{{r.pct_text}}</b></td>
               </tr>
             </table>
-
-            <div style="margin-top:.6em; color:#777; font-size:.9em;">
-              Unit shown: {{current_unit_ghg}} (from ECAM UI).
-            </div>
           </div>
 
-          <div v-if="sfd_compare_baseline_sfd || sfd_compare_future_sfd" class="chart_container" style="margin-top:1em;">
-            <div class="chart_title">SFD graphics (Baseline vs Future)</div>
-            <div style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start; margin-top:1em;">
+          <div class="chart_container" v-if="compare_baseline_sfd || compare_future_sfd">
+            <div class="chart_title">SFD graphics</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1em;margin-top:1em;">
               <div>
-                <b>Baseline SFD</b>
-                <div style="margin-top:.5em;">
-                  <img v-if="sfd_compare_baseline_sfd" :src="sfd_compare_baseline_sfd" style="max-width:100%; height:auto; display:block; border:1px solid #ddd;">
-                  <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No image uploaded.</div>
+                <div style="font-weight:700;margin-bottom:.5em;">Baseline SFD</div>
+                <div v-if="compare_baseline_sfd">
+                  <img :src="compare_baseline_sfd" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #ddd;">
                 </div>
+                <div v-else style="color:#888;padding:1em;border:1px dashed #ccc;">No baseline SFD uploaded.</div>
               </div>
               <div>
-                <b>Future SFD</b>
-                <div style="margin-top:.5em;">
-                  <img v-if="sfd_compare_future_sfd" :src="sfd_compare_future_sfd" style="max-width:100%; height:auto; display:block; border:1px solid #ddd;">
-                  <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No image uploaded.</div>
+                <div style="font-weight:700;margin-bottom:.5em;">Future SFD</div>
+                <div v-if="compare_future_sfd">
+                  <img :src="compare_future_sfd" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #ddd;">
                 </div>
+                <div v-else style="color:#888;padding:1em;border:1px dashed #ccc;">No future SFD uploaded.</div>
               </div>
             </div>
           </div>
-        </div>
-
 
         </div>
+
+</div>
 
       </div>
     </div>
@@ -1512,12 +1644,9 @@ get_sfd_emissions(){
     this.$nextTick(()=>{
       try{
         _this.sync_globals();
-
         _this.draw_all_charts();
-        try{ _this.draw_sfd_charts(); }catch(e){}
-      }catch(e){
-        console.warn(e);
-      }
+        try{ if(_this.current_view==='sfd') _this.draw_sfd_charts(); }catch(e){}
+      }catch(e){ console.warn(e); }
     })
   },
 
