@@ -568,7 +568,7 @@ get_sfd_emissions(){
         <button @click="current_view='charts_ghg'" :selected="current_view=='charts_ghg'" >{{translate("Charts GHG")                }}</button>
         <button @click="current_view='charts_nrg'" :selected="current_view=='charts_nrg'" >{{translate("Charts Energy")             }}</button>
         <button @click="current_view='charts_pop'" :selected="current_view=='charts_pop'" >{{translate("Charts Serviced population")}}</button>
-        <button @click="current_view='sfd'" :selected="current_view=='sfd'" >SFD</button>
+        <button type="button" @click.prevent="current_view=\'sfd\'" :selected="current_view==\'sfd\'" >SFD</button>
         <hr style="border-color:#eee">
         <div>
           <tutorial_tip
@@ -1111,13 +1111,13 @@ get_sfd_emissions(){
               <label style="font-size:.9em;color:#555;">View:
                 
               </label>
-              <button @click="download_sfd_jpg()">Download JPG</button>
+              <button type="button" @click.prevent="download_sfd_jpg()">Download JPG</button>
 </div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
                 <b>Upload SFD graphic</b><br>
                 <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
-                <button v-if="sfd_image_dataurl" @click="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
+                <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
               <div style="color:#666; font-size:.9em;">
                 
