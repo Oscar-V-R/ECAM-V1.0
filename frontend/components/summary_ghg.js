@@ -146,224 +146,66 @@ let summary_ghg=new Vue({
 
     
     // Download a single JPG image containing: emissions numbers + pie charts + the SFD graphic
-    
-    // Download a single JPG image containing: emissions numbers + pie charts + the SFD graphic
-    // Rendered to match the on-screen ECAM layout as closely as possible (2-column, centered, same labels).
-    download_sfd_jpg(){
-      if(!this.sfd_image_dataurl){
-        alert("Please upload an SFD image first.");
-        return;
-      }
+    ensure_html2canvas(){
+      return new Promise((resolve,reject)=>{
+        try{
+          if(typeof window !== "undefined" && window.html2canvas){
+            resolve();
+            return;
+          }
+          // load once
+          if(document.getElementById("html2canvas_loader")){
+            const t0 = Date.now();
+            const wait = setInterval(()=>{
+              if(window.html2canvas){
+                clearInterval(wait);
+                resolve();
+              }else if(Date.now()-t0>8000){
+                clearInterval(wait);
+                reject(new Error("html2canvas load timeout"));
+              }
+            }, 100);
+            return;
+          }
+          const s = document.createElement("script");
+          s.id = "html2canvas_loader";
+          s.async = true;
+          s.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+          s.onload = ()=>resolve();
+          s.onerror = ()=>reject(new Error("Failed to load html2canvas"));
+          document.head.appendChild(s);
+        }catch(e){ reject(e); }
+      });
+    },
 
-      const e = this.get_sfd_emissions();
-      const unit = this.current_unit_ghg;
-
-      const W = 1600;
-      const H = 1000;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext("2d");
-
-      // Background
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0,0,W,H);
-
-      // Helpers (match ECAM's comma formatting)
-      const divisor = (unit === "tCO2eq") ? 1000 : 1;
-      const nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-      const fmtVal = (v)=> nf.format(Math.round((v||0)/divisor));
-      const valueText = (v)=> `${fmtVal(v)} (${unit})`;
-
-      const drawTextRight = (txt, x, y, font, color="#000")=>{
-        ctx.font = font;
-        ctx.fillStyle = color;
-        const w = ctx.measureText(txt).width;
-        ctx.fillText(txt, x - w, y);
-      };
-
-      const drawPie = (cx, cy, r, values, colors)=>{
-        const tot = values.reduce((p,c)=>p+(c||0),0);
-        // base circle if empty
-        if(!(tot>0)){
-          ctx.fillStyle="#eee";
-          ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
-          ctx.strokeStyle="#ffffff";
-          ctx.lineWidth=3;
-          ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+    download_sfd_jpg: async function(){
+      try{
+        if(!this.sfd_image_dataurl){
+          alert("Please upload an SFD image first.");
           return;
         }
 
-        let a = -Math.PI/2;
-        for(let i=0;i<values.length;i++){
-          const v = values[i] || 0;
-          if(v<=0) continue;
-          const ang = (v/tot)*Math.PI*2;
+        // Ensure html2canvas is available so the export matches the ECAM on-screen layout.
+        await this.ensure_html2canvas();
 
-          ctx.fillStyle = colors[i] || "#ccc";
-          ctx.beginPath();
-          ctx.moveTo(cx,cy);
-          ctx.arc(cx,cy,r,a,a+ang);
-          ctx.closePath();
-          ctx.fill();
-
-          // % label (like ECAM)
-          const pct = Math.round((v/tot)*100);
-          if(pct>0){
-            const mid = a + ang/2;
-            const tx = cx + Math.cos(mid) * (r*0.65);
-            const ty = cy + Math.sin(mid) * (r*0.65);
-            ctx.fillStyle="#000";
-            ctx.font="16px Arial";
-            const t = `${pct}%`;
-            const tw = ctx.measureText(t).width;
-            ctx.fillText(t, tx - tw/2, ty + 6);
-          }
-
-          a += ang;
+        const el = document.getElementById("sfd_export_area");
+        if(!el){
+          alert("Export area not found.");
+          return;
         }
 
-        ctx.strokeStyle="#ffffff";
-        ctx.lineWidth=3;
-        ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-      };
-
-      // --- Layout: same 2-column feel as ECAM (left = emissions summary, right = SFD graphic) ---
-      const margin = 60;
-      const gap = 40;
-
-      const colW = Math.floor((W - margin*2 - gap)/2);
-      const leftX = margin;
-      const rightX = leftX + colW + gap;
-
-      // Title
-      ctx.fillStyle="#000";
-      ctx.font="700 34px Arial";
-      ctx.fillText("ECAM – SFD + Emissions Summary", leftX, 70);
-
-      // LEFT COLUMN: Emissions summary
-      const leftTop = 150;
-      ctx.font="700 28px Arial";
-      ctx.fillStyle="#2c6db2"; // ECAM-like blue
-      ctx.fillText("Emissions summary", leftX, leftTop);
-
-      const sectionPadTop = 30;
-      const tableW = Math.floor(colW * 0.50);
-      const pieAreaW = colW - tableW;
-      const colLabelX = leftX + 10;
-      const colValueRight = leftX + tableW - 10;
-
-      const pieR = Math.min(150, Math.floor((pieAreaW - 40)/2), 150);
-      const pieCX = leftX + tableW + Math.floor(pieAreaW/2);
-      const offY = leftTop + sectionPadTop + 40;
-
-      // OFFSITE
-      ctx.fillStyle="#000";
-      ctx.font="700 18px Arial";
-      ctx.fillText("OFFSITE SANITATION", leftX + 10, leftTop + sectionPadTop);
-
-      const lineY0 = offY;
-      const lh = 44;
-
-      // Labels
-      ctx.font="18px Arial";
-      ctx.fillStyle="#000";
-      ctx.fillText("Collection", colLabelX, lineY0);
-      ctx.fillText("Transport",  colLabelX, lineY0+lh);
-      ctx.fillText("Treatment",  colLabelX, lineY0+lh*2);
-
-      ctx.font="700 18px Arial";
-      ctx.fillText("Total",      colLabelX, lineY0+lh*3);
-
-      // Values (right aligned)
-      drawTextRight(valueText(e.offsite.Collection), colValueRight, lineY0,        "700 18px Arial");
-      drawTextRight(valueText(e.offsite.Transport),  colValueRight, lineY0+lh,     "700 18px Arial");
-      drawTextRight(valueText(e.offsite.Treatment),  colValueRight, lineY0+lh*2,   "700 18px Arial");
-      drawTextRight(valueText(e.offsite.total),      colValueRight, lineY0+lh*3,   "700 18px Arial");
-
-      // Pie (OFFSITE)
-      drawPie(
-        pieCX,
-        lineY0 + lh*1.2,
-        pieR,
-        [e.offsite.Collection, e.offsite.Transport, e.offsite.Treatment],
-        ["#4f81bd","#c9c9c9","#9bbb59"]
-      );
-
-      // Divider
-      const divY = lineY0 + lh*3 + 35;
-      ctx.strokeStyle="#e5e5e5";
-      ctx.lineWidth=2;
-      ctx.beginPath();
-      ctx.moveTo(leftX, divY);
-      ctx.lineTo(leftX + colW, divY);
-      ctx.stroke();
-
-      // ONSITE
-      const onsiteTop = divY + 55;
-      ctx.fillStyle="#7aa63b"; // ECAM-like green for the section label
-      ctx.font="700 18px Arial";
-      ctx.fillText("ONSITE SANITATION", leftX + 10, onsiteTop);
-
-      const onY0 = onsiteTop + 55;
-
-      ctx.fillStyle="#000";
-      ctx.font="18px Arial";
-      ctx.fillText("Containment", colLabelX, onY0);
-      ctx.fillText("Emptying",    colLabelX, onY0+lh);
-      ctx.fillText("Treatment",   colLabelX, onY0+lh*2);
-      ctx.fillText("Discharge",   colLabelX, onY0+lh*3);
-
-      ctx.font="700 18px Arial";
-      ctx.fillText("Total",       colLabelX, onY0+lh*4);
-
-      drawTextRight(valueText(e.onsite.Containment), colValueRight, onY0,        "700 18px Arial");
-      drawTextRight(valueText(e.onsite.Emptying),    colValueRight, onY0+lh,     "700 18px Arial");
-      drawTextRight(valueText(e.onsite.Treatment),   colValueRight, onY0+lh*2,   "700 18px Arial");
-      drawTextRight(valueText(e.onsite.Discharge),   colValueRight, onY0+lh*3,   "700 18px Arial");
-      drawTextRight(valueText(e.onsite.total),       colValueRight, onY0+lh*4,   "700 18px Arial");
-
-      drawPie(
-        pieCX,
-        onY0 + lh*1.75,
-        pieR,
-        [e.onsite.Containment, e.onsite.Emptying, e.onsite.Treatment, e.onsite.Discharge],
-        ["#4f81bd","#c9c9c9","#9bbb59","#d9d9d9"]
-      );
-
-      // RIGHT COLUMN: SFD graphic
-      const sfdTitleY = leftTop;
-      ctx.font="700 28px Arial";
-      ctx.fillStyle="#2c6db2";
-      ctx.fillText("SFD graphic", rightX, sfdTitleY);
-
-      // Border box (same visual as ECAM panel)
-      const boxX = rightX;
-      const boxY = leftTop + 20;
-      const boxW = colW;
-      const boxH = H - boxY - margin;
-
-      ctx.strokeStyle="#dcdcdc";
-      ctx.lineWidth=2;
-      ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-      const img = new Image();
-      img.onload = () => {
-        // Fit image in box with centered placement (like ECAM)
-        const pad = 18;
-        const innerX = boxX + pad;
-        const innerY = boxY + pad;
-        const innerW = boxW - pad*2;
-        const innerH = boxH - pad*2;
-
-        const scale = Math.min(innerW / img.width, innerH / img.height);
-        const dw = img.width * scale;
-        const dh = img.height * scale;
-        const dx = innerX + (innerW - dw)/2;
-        const dy = innerY + (innerH - dh)/2;
-
-        ctx.drawImage(img, dx, dy, dw, dh);
+        // Render exactly what the user sees (numbers + pie charts + SFD image)
+        const canvas = await window.html2canvas(el, {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          scrollX: 0,
+          scrollY: -window.scrollY,
+          windowWidth: document.documentElement.clientWidth,
+          windowHeight: document.documentElement.clientHeight,
+        });
 
         canvas.toBlob((blob)=>{
           if(!blob){
@@ -379,10 +221,12 @@ let summary_ghg=new Vue({
           a.remove();
           setTimeout(()=>URL.revokeObjectURL(url), 1500);
         }, "image/jpeg", 0.92);
-      };
-      img.onerror = () => alert("Could not load SFD image for export.");
-      img.src = this.sfd_image_dataurl;
+      }catch(err){
+        console.error(err);
+        alert("Could not export JPG.");
+      }
     },
+
 get_sfd_emissions(){
       const zeros = {
         offsite:{ Collection:0, Transport:0, Treatment:0, total:0 },
