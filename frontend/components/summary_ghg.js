@@ -15,9 +15,6 @@ let summary_ghg=new Vue({
 
     // --- SFD tab (UI only) ---
     sfd_image_dataurl:null,
-    // keep it defined (it was referenced in template before)
-    // user wants always BOTH -> we keep the field but we don't hide anything based on it
-    sfd_view_mode:"both",
 
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
@@ -30,7 +27,7 @@ let summary_ghg=new Vue({
     variable,
     Charts,
 
-    //backend (these must be kept in sync after JSON import)
+    //backend
     Global,
     Structure,
     Languages,
@@ -43,33 +40,6 @@ let summary_ghg=new Vue({
     format,
     go_to,
     get_sum_of_substages,
-
-    // keep Vue refs in sync with window.* after importing ECAM JSON
-    sync_globals(){
-      try{
-        // use window.* as source of truth if present
-        if(typeof window!=="undefined"){
-          if(window.Global) this.Global = window.Global;
-          if(window.Structure) this.Structure = window.Structure;
-          if(window.Languages) this.Languages = window.Languages;
-          if(window.IPCC_categories) this.IPCC_categories = window.IPCC_categories;
-          if(window.Formulas) this.Formulas = window.Formulas;
-          if(window.variable) this.variable = window.variable;
-          if(window.Charts) this.Charts = window.Charts;
-        }else{
-          // fallback to globals (non-window contexts)
-          if(typeof Global!=="undefined" && Global) this.Global = Global;
-          if(typeof Structure!=="undefined" && Structure) this.Structure = Structure;
-          if(typeof Languages!=="undefined" && Languages) this.Languages = Languages;
-          if(typeof IPCC_categories!=="undefined" && IPCC_categories) this.IPCC_categories = IPCC_categories;
-          if(typeof Formulas!=="undefined" && Formulas) this.Formulas = Formulas;
-          if(typeof variable!=="undefined" && variable) this.variable = variable;
-          if(typeof Charts!=="undefined" && Charts) this.Charts = Charts;
-        }
-      }catch(e){
-        console.warn("sync_globals failed:", e);
-      }
-    },
 
     //sorting function for emission sources order requested by elaine
     emission_sources_order(a,b){
@@ -169,7 +139,16 @@ let summary_ghg=new Vue({
       if(b) b.innerHTML="";
     },
 
+    // Export SFD + results (UI only) as single file
+
+    // Uses SVG foreignObject to rasterize the export area to PNG (works in Chrome)
+
+
+    
     // Download a single JPG image containing: emissions numbers + pie charts + the SFD graphic
+    
+    // Download a single JPG image containing: emissions numbers + pie charts + the SFD graphic
+    // Rendered to match the on-screen ECAM layout as closely as possible (2-column, centered, same labels).
     download_sfd_jpg(){
       if(!this.sfd_image_dataurl){
         alert("Please upload an SFD image first.");
@@ -181,118 +160,208 @@ let summary_ghg=new Vue({
 
       const W = 1600;
       const H = 1000;
+
       const canvas = document.createElement("canvas");
       canvas.width = W;
       canvas.height = H;
       const ctx = canvas.getContext("2d");
 
+      // Background
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0,0,W,H);
 
-      const fmt = (v)=>this.format_emission(v);
-      ctx.fillStyle="#000";
-      ctx.font="700 34px Arial";
-      ctx.fillText("ECAM – SFD + Emissions Summary", 50, 60);
+      // Helpers (match ECAM's comma formatting)
+      const divisor = (unit === "tCO2eq") ? 1000 : 1;
+      const nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+      const fmtVal = (v)=> nf.format(Math.round((v||0)/divisor));
+      const valueText = (v)=> `${fmtVal(v)} (${unit})`;
 
-      // --- Layout (centered like ECAM) ---
-      const margin = 80;   // outer margin
-      const gap    = 70;   // gap between left panel and SFD panel
-
-      // Right panel (SFD)
-      const boxW = 800;
-      const boxH = 820;
-      const boxX = W - margin - boxW;
-      const boxY = 140;
-
-      // Left panel (numbers + pies)
-      const leftX = margin;
-      const leftRight = boxX - gap;
-      const leftW = leftRight - leftX;
-
-      // Right-aligned column for values (replaces fixed 650)
-      const colRight = leftRight;
-
-      // Pie X center inside the left panel
-      const pieCX = leftX + Math.round(leftW * 0.78);
-
-      // Tops
-      const topY = 110;
-      ctx.font="700 20px Arial";
-      ctx.fillText("OFFSITE SANITATION", leftX, topY);
-
-      const line = (label, val, y, bold=false)=>{
-        ctx.font = (bold ? "700 18px Arial":"18px Arial");
-        ctx.fillStyle="#000";
-        ctx.fillText(label, leftX, y);
-        const txt = `${fmt(val)} (${unit})`;
-        const tw = ctx.measureText(txt).width;
-        ctx.fillText(txt, colRight - tw, y);
+      const drawTextRight = (txt, x, y, font, color="#000")=>{
+        ctx.font = font;
+        ctx.fillStyle = color;
+        const w = ctx.measureText(txt).width;
+        ctx.fillText(txt, x - w, y);
       };
 
-      line("Collection", e.offsite.Collection, topY+40);
-      line("Transport",  e.offsite.Transport,  topY+70);
-      line("Treatment",  e.offsite.Treatment,  topY+100);
-      line("Total",      e.offsite.total,      topY+140, true);
-
       const drawPie = (cx, cy, r, values, colors)=>{
-        const tot = values.reduce((p,c)=>p+c,0);
-        if(tot<=0){
+        const tot = values.reduce((p,c)=>p+(c||0),0);
+        // base circle if empty
+        if(!(tot>0)){
           ctx.fillStyle="#eee";
           ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+          ctx.strokeStyle="#ffffff";
+          ctx.lineWidth=3;
+          ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
           return;
         }
+
         let a = -Math.PI/2;
         for(let i=0;i<values.length;i++){
-          const v=values[i];
+          const v = values[i] || 0;
+          if(v<=0) continue;
           const ang = (v/tot)*Math.PI*2;
+
           ctx.fillStyle = colors[i] || "#ccc";
           ctx.beginPath();
           ctx.moveTo(cx,cy);
           ctx.arc(cx,cy,r,a,a+ang);
           ctx.closePath();
           ctx.fill();
+
+          // % label (like ECAM)
+          const pct = Math.round((v/tot)*100);
+          if(pct>0){
+            const mid = a + ang/2;
+            const tx = cx + Math.cos(mid) * (r*0.65);
+            const ty = cy + Math.sin(mid) * (r*0.65);
+            ctx.fillStyle="#000";
+            ctx.font="16px Arial";
+            const t = `${pct}%`;
+            const tw = ctx.measureText(t).width;
+            ctx.fillText(t, tx - tw/2, ty + 6);
+          }
+
           a += ang;
         }
-        ctx.strokeStyle="#fff";
+
+        ctx.strokeStyle="#ffffff";
         ctx.lineWidth=3;
         ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
       };
 
-      drawPie(pieCX, topY+85, 90,
+      // --- Layout: same 2-column feel as ECAM (left = emissions summary, right = SFD graphic) ---
+      const margin = 60;
+      const gap = 40;
+
+      const colW = Math.floor((W - margin*2 - gap)/2);
+      const leftX = margin;
+      const rightX = leftX + colW + gap;
+
+      // Title
+      ctx.fillStyle="#000";
+      ctx.font="700 34px Arial";
+      ctx.fillText("ECAM – SFD + Emissions Summary", leftX, 70);
+
+      // LEFT COLUMN: Emissions summary
+      const leftTop = 150;
+      ctx.font="700 28px Arial";
+      ctx.fillStyle="#2c6db2"; // ECAM-like blue
+      ctx.fillText("Emissions summary", leftX, leftTop);
+
+      const sectionPadTop = 30;
+      const tableW = Math.floor(colW * 0.50);
+      const pieAreaW = colW - tableW;
+      const colLabelX = leftX + 10;
+      const colValueRight = leftX + tableW - 10;
+
+      const pieR = Math.min(150, Math.floor((pieAreaW - 40)/2), 150);
+      const pieCX = leftX + tableW + Math.floor(pieAreaW/2);
+      const offY = leftTop + sectionPadTop + 40;
+
+      // OFFSITE
+      ctx.fillStyle="#000";
+      ctx.font="700 18px Arial";
+      ctx.fillText("OFFSITE SANITATION", leftX + 10, leftTop + sectionPadTop);
+
+      const lineY0 = offY;
+      const lh = 44;
+
+      // Labels
+      ctx.font="18px Arial";
+      ctx.fillStyle="#000";
+      ctx.fillText("Collection", colLabelX, lineY0);
+      ctx.fillText("Transport",  colLabelX, lineY0+lh);
+      ctx.fillText("Treatment",  colLabelX, lineY0+lh*2);
+
+      ctx.font="700 18px Arial";
+      ctx.fillText("Total",      colLabelX, lineY0+lh*3);
+
+      // Values (right aligned)
+      drawTextRight(valueText(e.offsite.Collection), colValueRight, lineY0,        "700 18px Arial");
+      drawTextRight(valueText(e.offsite.Transport),  colValueRight, lineY0+lh,     "700 18px Arial");
+      drawTextRight(valueText(e.offsite.Treatment),  colValueRight, lineY0+lh*2,   "700 18px Arial");
+      drawTextRight(valueText(e.offsite.total),      colValueRight, lineY0+lh*3,   "700 18px Arial");
+
+      // Pie (OFFSITE)
+      drawPie(
+        pieCX,
+        lineY0 + lh*1.2,
+        pieR,
         [e.offsite.Collection, e.offsite.Transport, e.offsite.Treatment],
-        ["#4f81bd","#f79646","#9bbb59"]
+        ["#4f81bd","#c9c9c9","#9bbb59"]
       );
 
-      const y2 = topY+260;
-      ctx.font="700 20px Arial";
-      ctx.fillText("ONSITE SANITATION", leftX, y2);
+      // Divider
+      const divY = lineY0 + lh*3 + 35;
+      ctx.strokeStyle="#e5e5e5";
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(leftX, divY);
+      ctx.lineTo(leftX + colW, divY);
+      ctx.stroke();
 
-      line("Containment", e.onsite.Containment, y2+40);
-      line("Emptying",    e.onsite.Emptying,    y2+70);
-      line("Treatment",   e.onsite.Treatment,   y2+100);
-      line("Discharge",   e.onsite.Discharge,   y2+130);
-      line("Total",       e.onsite.total,       y2+170, true);
+      // ONSITE
+      const onsiteTop = divY + 55;
+      ctx.fillStyle="#7aa63b"; // ECAM-like green for the section label
+      ctx.font="700 18px Arial";
+      ctx.fillText("ONSITE SANITATION", leftX + 10, onsiteTop);
 
-      drawPie(pieCX, y2+110, 90,
+      const onY0 = onsiteTop + 55;
+
+      ctx.fillStyle="#000";
+      ctx.font="18px Arial";
+      ctx.fillText("Containment", colLabelX, onY0);
+      ctx.fillText("Emptying",    colLabelX, onY0+lh);
+      ctx.fillText("Treatment",   colLabelX, onY0+lh*2);
+      ctx.fillText("Discharge",   colLabelX, onY0+lh*3);
+
+      ctx.font="700 18px Arial";
+      ctx.fillText("Total",       colLabelX, onY0+lh*4);
+
+      drawTextRight(valueText(e.onsite.Containment), colValueRight, onY0,        "700 18px Arial");
+      drawTextRight(valueText(e.onsite.Emptying),    colValueRight, onY0+lh,     "700 18px Arial");
+      drawTextRight(valueText(e.onsite.Treatment),   colValueRight, onY0+lh*2,   "700 18px Arial");
+      drawTextRight(valueText(e.onsite.Discharge),   colValueRight, onY0+lh*3,   "700 18px Arial");
+      drawTextRight(valueText(e.onsite.total),       colValueRight, onY0+lh*4,   "700 18px Arial");
+
+      drawPie(
+        pieCX,
+        onY0 + lh*1.75,
+        pieR,
         [e.onsite.Containment, e.onsite.Emptying, e.onsite.Treatment, e.onsite.Discharge],
-        ["#4f81bd","#f79646","#9bbb59","#c9c9c9"]
+        ["#4f81bd","#c9c9c9","#9bbb59","#d9d9d9"]
       );
+
+      // RIGHT COLUMN: SFD graphic
+      const sfdTitleY = leftTop;
+      ctx.font="700 28px Arial";
+      ctx.fillStyle="#2c6db2";
+      ctx.fillText("SFD graphic", rightX, sfdTitleY);
+
+      // Border box (same visual as ECAM panel)
+      const boxX = rightX;
+      const boxY = leftTop + 20;
+      const boxW = colW;
+      const boxH = H - boxY - margin;
+
+      ctx.strokeStyle="#dcdcdc";
+      ctx.lineWidth=2;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
 
       const img = new Image();
       img.onload = () => {
-        ctx.fillStyle="#000";
-        ctx.font="700 20px Arial";
-        ctx.fillText("SFD graphic", boxX, 120);
+        // Fit image in box with centered placement (like ECAM)
+        const pad = 18;
+        const innerX = boxX + pad;
+        const innerY = boxY + pad;
+        const innerW = boxW - pad*2;
+        const innerH = boxH - pad*2;
 
-        const scale = Math.min(boxW / img.width, boxH / img.height);
+        const scale = Math.min(innerW / img.width, innerH / img.height);
         const dw = img.width * scale;
         const dh = img.height * scale;
-        const dx = boxX + (boxW - dw)/2;
-        const dy = boxY + (boxH - dh)/2;
-
-        ctx.strokeStyle="#ddd";
-        ctx.lineWidth=2;
-        ctx.strokeRect(boxX, boxY, boxW, boxH);
+        const dx = innerX + (innerW - dw)/2;
+        const dy = innerY + (innerH - dh)/2;
 
         ctx.drawImage(img, dx, dy, dw, dh);
 
@@ -314,18 +383,14 @@ let summary_ghg=new Vue({
       img.onerror = () => alert("Could not load SFD image for export.");
       img.src = this.sfd_image_dataurl;
     },
-
-    get_sfd_emissions(){
+get_sfd_emissions(){
       const zeros = {
         offsite:{ Collection:0, Transport:0, Treatment:0, total:0 },
         onsite :{ Containment:0, Emptying:0, Treatment:0, Discharge:0, total:0 },
       };
 
       try{
-        // IMPORTANT: use the current (synced) reference
-        if(!this.Global || !this.Global.Waste) return zeros;
-
-        const Global = this.Global;
+        if(!Global || !Global.Waste) return zeros;
 
         // OFFSITE SANITATION
         const off_collection = (Global.Waste.Collection||[]).map(s =>
@@ -392,10 +457,6 @@ let summary_ghg=new Vue({
       const e = this.get_sfd_emissions();
       const pct = (v, tot) => tot>0 ? (100*v/tot) : 0;
 
-      // IMPORTANT: use the current charts helper (synced)
-      const Charts = this.Charts || window.Charts;
-      if(!Charts || !Charts.draw_pie_chart) return;
-
       Charts.draw_pie_chart(
         "chart_sfd_offsite",
         [
@@ -418,75 +479,67 @@ let summary_ghg=new Vue({
       );
     },
 
+
     //call chart drawing functions
     draw_all_charts(){
       //destroy all charts
       Object.values(this.charts).forEach(chart=>chart.destroy());
 
-      // IMPORTANT: use current (synced) refs
-      const Global = this.Global;
-      const Structure = this.Structure;
-      const Charts = this.Charts;
-      const IPCC_categories = this.IPCC_categories;
-
-      if(!Global || !Structure || !Charts) return;
-
       //pie charts
-      Charts.draw_pie_chart('chart_1',
-        [
-          {"label":"", "value":100*Global.Water.ws_KPI_GHG().total/Global.TotalGHG().total},
-          {"label":"", "value":100*Global.Waste.ww_KPI_GHG().total/Global.TotalGHG().total},
-        ],[
-          "var(--color-level-Water)",
-          "var(--color-level-Waste)",
-        ]
-      );
+        Charts.draw_pie_chart('chart_1',
+          [
+            {"label":"", "value":100*Global.Water.ws_KPI_GHG().total/Global.TotalGHG().total},
+            {"label":"", "value":100*Global.Waste.ww_KPI_GHG().total/Global.TotalGHG().total},
+          ],[
+            "var(--color-level-Water)",
+            "var(--color-level-Waste)",
+          ]
+        );
 
-      Charts.draw_pie_chart('chart_2',
-        Structure.filter(s=>s.sublevel).map(s=>{
-          let label = "";
-          let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_KPI_GHG']().total).sum()/Global.TotalGHG().total;
-          return {label,value};
-        }),
-        Structure.filter(s=>s.sublevel).map(s=>s.color),
-      );
+        Charts.draw_pie_chart('chart_2',
+          Structure.filter(s=>s.sublevel).map(s=>{
+            let label = "";
+            let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_KPI_GHG']().total).sum()/Global.TotalGHG().total;
+            return {label,value};
+          }),
+          Structure.filter(s=>s.sublevel).map(s=>s.color),
+        );
 
-      //d3js pie chart -- ghg by gas
-      Charts.draw_pie_chart('chart_3',
-        [
-          {"label":"", "value":100*Global.TotalGHG().co2/Global.TotalGHG().total},
-          {"label":"", "value":100*Global.TotalGHG().n2o/Global.TotalGHG().total},
-          {"label":"", "value":100*Global.TotalGHG().ch4/Global.TotalGHG().total},
-        ],
-        [
-          Charts.gas_colors.co2,
-          Charts.gas_colors.n2o,
-          Charts.gas_colors.ch4,
-        ],
-      );
+        //d3js pie chart -- ghg by gas
+        Charts.draw_pie_chart('chart_3',
+          [
+            {"label":"", "value":100*Global.TotalGHG().co2/Global.TotalGHG().total},
+            {"label":"", "value":100*Global.TotalGHG().n2o/Global.TotalGHG().total},
+            {"label":"", "value":100*Global.TotalGHG().ch4/Global.TotalGHG().total},
+          ],
+          [
+            Charts.gas_colors.co2,
+            Charts.gas_colors.n2o,
+            Charts.gas_colors.ch4,
+          ],
+        );
 
-      Charts.draw_pie_chart('chart_nrg_levels',
-        [
-          {"label":"", "value":100*Global.Water.ws_nrg_cons()/Global.TotalNRG()},
-          {"label":"", "value":100*Global.Waste.ww_nrg_cons()/Global.TotalNRG()},
-        ],
-        [
-          "var(--color-level-Water)",
-          "var(--color-level-Waste)",
-        ],
-      );
+        Charts.draw_pie_chart('chart_nrg_levels',
+          [
+            {"label":"", "value":100*Global.Water.ws_nrg_cons()/Global.TotalNRG()},
+            {"label":"", "value":100*Global.Waste.ww_nrg_cons()/Global.TotalNRG()},
+          ],
+          [
+            "var(--color-level-Water)",
+            "var(--color-level-Waste)",
+          ],
+        );
 
-      Charts.draw_pie_chart('chart_nrg_stages',
-        Structure.filter(s=>s.sublevel).map(s=>{
-          let total_nrg = Global.TotalNRG();
-          let label = "";
-          let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_nrg_cons']).sum()/total_nrg;
-          return {label,value};
-        }),
-        Structure.filter(s=>s.sublevel).map(s=>s.color),
-      );
+        Charts.draw_pie_chart('chart_nrg_stages',
+          Structure.filter(s=>s.sublevel).map(s=>{
+            let total_nrg = Global.TotalNRG();
+            let label = "";
+            let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_nrg_cons']).sum()/total_nrg;
+            return {label,value};
+          }),
+          Structure.filter(s=>s.sublevel).map(s=>s.color),
+        );
 
-      if(IPCC_categories){
         Charts.draw_pie_chart('chart_ipcc_categories',
           Object.keys(IPCC_categories).map(key=>{
             let total_ghg = Global.TotalGHG().total;
@@ -496,29 +549,29 @@ let summary_ghg=new Vue({
           }),
           Object.values(IPCC_categories).map(obj=>obj.color),
         );
-      }
 
-      Charts.draw_pie_chart('pie_chart_ws_serv_pop',
-        [
-          {label:translate('ws_serv_pop_descr'), value:    100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
-          {label:translate('ws_serv_pop_descr'), value:100-100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
-        ],
-        colors=[
-          "var(--color-level-Water)",
-          "#eee",
-        ],
-      );
+        Charts.draw_pie_chart('pie_chart_ws_serv_pop',
+          [
+            {label:translate('ws_serv_pop_descr'), value:    100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
+            {label:translate('ws_serv_pop_descr'), value:100-100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
+          ],
+          colors=[
+            "var(--color-level-Water)",
+            "#eee",
+          ],
+        );
 
-      Charts.draw_pie_chart('pie_chart_ww_serv_pop',
-        [
-          {label:translate('ww_serv_pop_descr'), value:    100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
-          {label:translate('ww_serv_pop_descr'), value:100-100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
-        ],
-        colors=[
-          "var(--color-level-Waste)",
-          "#eee",
-        ],
-      );
+        Charts.draw_pie_chart('pie_chart_ww_serv_pop',
+          [
+            {label:translate('ww_serv_pop_descr'), value:    100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
+            {label:translate('ww_serv_pop_descr'), value:100-100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
+          ],
+          colors=[
+            "var(--color-level-Waste)",
+            "#eee",
+          ],
+        );
+      //--
 
       //Chart.js bar chart -- ghg by substage
       if(document.getElementById('bar_chart_ghg_substages')){
@@ -550,8 +603,14 @@ let summary_ghg=new Vue({
           options:{
             aspectRatio:4,
             scales:{
-              x:{ stacked:true },
-              y:{ beginAtZero:true, borderWidth:2, stacked:true },
+              x:{
+                stacked:true,
+              },
+              y:{
+                beginAtZero:true,
+                borderWidth:2,
+                stacked:true,
+              },
             },
           },
         });
@@ -585,7 +644,10 @@ let summary_ghg=new Vue({
           options:{
             aspectRatio:4,
             scales:{
-              y:{ beginAtZero:true, borderWidth:2 },
+              y:{
+                beginAtZero:true,
+                borderWidth:2,
+              },
             },
           },
         });
@@ -595,14 +657,15 @@ let summary_ghg=new Vue({
 
   watch:{
     current_view(newV){
-      // DO NOT clear the uploaded SFD image just because the user clicks the tab.
-      // Only redraw charts when entering SFD.
+      if(newV==='sfd'){
+        this.clear_sfd_image();
+      }
       this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
     }
   },
 
   template:`
-    <div id=summary_ghg v-if="visible && Languages.ready && Global && Structure && Formulas">
+    <div id=summary_ghg v-if="visible && Languages.ready">
       <div> {{show_summaries_menu()}} </div>
 
       <!--title-->
@@ -987,6 +1050,29 @@ let summary_ghg=new Vue({
               </div>
             </div>
 
+            <!--ipcc categories
+            <div class=chart_container style="border-right:none">
+              <div class=chart_title>
+                <img src="frontend/img/viti/select_scenario/icon-co2.svg" class=icon_co2>
+                GHG emissions by IPCC category
+              </div>
+              <div class=flex>
+                <table class=legend>
+                  <tr v-for="[key,obj] in Object.entries(IPCC_categories)" :title="key">
+                    <td :style="{background:obj.color}"></td>
+                    <td>
+                      {{obj.description}}
+                    </td>
+                    <td>
+                      <div v-html="format_emission(obj.emissions(Global))"></div>
+                    </td>
+                    <td class=unit v-html="current_unit_ghg.prettify()"></td>
+                  </tr>
+                </table>
+                <div id=chart_ipcc_categories></div>
+              </div>
+            </div>
+            -->
             <div class=chart_container></div>
           </div>
 
@@ -1129,21 +1215,24 @@ let summary_ghg=new Vue({
             </div>
           </div>
         </div>
-
         <!--SFD-->
         <div v-if="current_view=='sfd'">
-          <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
+                    <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
             <div style="display:flex;gap:.75em;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-bottom:.5em;">
+              <label style="font-size:.9em;color:#555;">View:
+                
+              </label>
               <button type="button" @click.prevent="download_sfd_jpg()">Download JPG</button>
-            </div>
-
+</div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
                 <b>Upload SFD graphic</b><br>
                 <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
                 <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
-              <div style="color:#666; font-size:.9em;"></div>
+              <div style="color:#666; font-size:.9em;">
+                
+              </div>
             </div>
           </div>
 
@@ -1161,7 +1250,7 @@ let summary_ghg=new Vue({
                     <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
                   </table>
                 </div>
-                <div><div id="chart_sfd_offsite"></div></div>
+                <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_offsite"></div></div>
               </div>
 
               <hr style="border-color:#eee; margin:1.2em 0;">
@@ -1177,10 +1266,12 @@ let summary_ghg=new Vue({
                     <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
                   </table>
                 </div>
-                <div><div id="chart_sfd_onsite"></div></div>
+                <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_onsite"></div></div>
               </div>
 
-              <div style="margin-top:1em; color:#888; font-size:.9em;"></div>
+              <div style="margin-top:1em; color:#888; font-size:.9em;">
+                {{translate("")}}
+              </div>
             </div>
 
             <div class="chart_container">
@@ -1201,42 +1292,10 @@ let summary_ghg=new Vue({
     </div>
   `,
 
-  mounted(){
-    // initial sync + keep syncing after JSON import (ECAM replaces window.Global)
-    this.sync_globals();
-    this._globalsPoll = setInterval(()=>{
-      try{
-        if(!this.visible) return;
-        const w = (typeof window!=="undefined") ? window : {};
-        const changed =
-          (w.Global && this.Global !== w.Global) ||
-          (w.Structure && this.Structure !== w.Structure) ||
-          (w.Formulas && this.Formulas !== w.Formulas) ||
-          (w.Languages && this.Languages !== w.Languages) ||
-          (w.IPCC_categories && this.IPCC_categories !== w.IPCC_categories) ||
-          (w.variable && this.variable !== w.variable) ||
-          (w.Charts && this.Charts !== w.Charts);
-
-        if(changed){
-          this.sync_globals();
-          this.$nextTick(()=>{
-            try{ this.draw_all_charts(); }catch(e){}
-            try{ this.draw_sfd_charts(); }catch(e){}
-          });
-        }
-      }catch(e){}
-    }, 500);
-  },
-
-  beforeDestroy(){
-    try{ if(this._globalsPoll) clearInterval(this._globalsPoll); }catch(e){}
-  },
-
   updated(){
     let _this=this;
     this.$nextTick(()=>{
       try{
-        _this.sync_globals();
         _this.draw_all_charts();
         try{ _this.draw_sfd_charts(); }catch(e){}
       }catch(e){
