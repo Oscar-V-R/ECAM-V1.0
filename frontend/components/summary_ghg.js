@@ -16,8 +16,6 @@ let summary_ghg=new Vue({
     // --- SFD tab (UI only) ---
     sfd_image_dataurl:null,
 
-    sfd_view_mode:"both", // numbers | charts | both
-
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
     current_unit_nrg:"kWh",
@@ -116,7 +114,7 @@ let summary_ghg=new Vue({
     // ---------------------------
 
     on_sfd_file_change(ev){
-      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      const file = ev && ev.target && ev.target.files ? ev.target && ev.target.files ? ev.target.files[0] : null : null;
       if(!file) return;
 
       const ok = /image\/(png|jpeg)/i.test(file.type);
@@ -141,10 +139,14 @@ let summary_ghg=new Vue({
       if(b) b.innerHTML="";
     },
 
+    // Export SFD + results (UI only) as single file
+
+    // Uses SVG foreignObject to rasterize the export area to PNG (works in Chrome)
+
 
     
-    // Download a single image (SVG) containing: SFD graphic + emissions numbers + simple pie charts
-    download_sfd_svg(){
+    // Download a single JPG image containing: emissions numbers + pie charts + the SFD graphic
+    download_sfd_jpg(){
       if(!this.sfd_image_dataurl){
         alert("Please upload an SFD image first.");
         return;
@@ -153,95 +155,121 @@ let summary_ghg=new Vue({
       const e = this.get_sfd_emissions();
       const unit = this.current_unit_ghg;
 
-      const W = 1400, H = 900;
-      const leftX = 50, topY = 90;
-      const rightX = 720;
+      const W = 1600;
+      const H = 1000;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
 
-      const esc = (s)=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-      const fmt = (v)=>esc(this.format_emission(v));
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0,0,W,H);
 
-      const piePath = (cx, cy, r, start, end) => {
-        const large = (end-start) > Math.PI ? 1 : 0;
-        const x1 = cx + r*Math.cos(start);
-        const y1 = cy + r*Math.sin(start);
-        const x2 = cx + r*Math.cos(end);
-        const y2 = cy + r*Math.sin(end);
-        return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+      const fmt = (v)=>this.format_emission(v);
+      ctx.fillStyle="#000";
+      ctx.font="700 34px Arial";
+      ctx.fillText("ECAM – SFD + Emissions Summary", 50, 60);
+
+      const leftX=50, topY=110;
+      ctx.font="700 20px Arial";
+      ctx.fillText("OFFSITE SANITATION", leftX, topY);
+
+      const line = (label, val, y, bold=false)=>{
+        ctx.font = (bold ? "700 18px Arial":"18px Arial");
+        ctx.fillStyle="#000";
+        ctx.fillText(label, leftX, y);
+        const txt = `${fmt(val)} (${unit})`;
+        const colRight = 650;
+        const tw = ctx.measureText(txt).width;
+        ctx.fillText(txt, colRight - tw, y);
       };
 
-      const makePie = (cx, cy, r, parts, colors) => {
-        const tot = parts.reduce((p,c)=>p+c.value,0);
+      line("Collection", e.offsite.Collection, topY+40);
+      line("Transport",  e.offsite.Transport,  topY+70);
+      line("Treatment",  e.offsite.Treatment,  topY+100);
+      line("Total",      e.offsite.total,      topY+140, true);
+
+      const drawPie = (cx, cy, r, values, colors)=>{
+        const tot = values.reduce((p,c)=>p+c,0);
         if(tot<=0){
-          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#eee" />`;
+          ctx.fillStyle="#eee";
+          ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+          return;
         }
         let a = -Math.PI/2;
-        let out = "";
-        parts.forEach((p,i)=>{
-          const frac = p.value/tot;
-          const b = a + frac*2*Math.PI;
-          out += `<path d="${piePath(cx,cy,r,a,b)}" fill="${colors[i]||'#ccc'}"></path>`;
-          a=b;
-        });
-        out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#fff" stroke-width="2"/>`;
-        return out;
+        for(let i=0;i<values.length;i++){
+          const v=values[i];
+          const ang = (v/tot)*Math.PI*2;
+          ctx.fillStyle = colors[i] || "#ccc";
+          ctx.beginPath();
+          ctx.moveTo(cx,cy);
+          ctx.arc(cx,cy,r,a,a+ang);
+          ctx.closePath();
+          ctx.fill();
+          a += ang;
+        }
+        ctx.strokeStyle="#fff";
+        ctx.lineWidth=3;
+        ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
       };
 
-      const offParts = [
-        {label:"Collection", value:e.offsite.Collection},
-        {label:"Transport",  value:e.offsite.Transport},
-        {label:"Treatment",  value:e.offsite.Treatment},
-      ];
-      const onParts = [
-        {label:"Containment", value:e.onsite.Containment},
-        {label:"Emptying",    value:e.onsite.Emptying},
-        {label:"Treatment",   value:e.onsite.Treatment},
-        {label:"Discharge",   value:e.onsite.Discharge},
-      ];
+      drawPie(480, topY+85, 90,
+        [e.offsite.Collection, e.offsite.Transport, e.offsite.Treatment],
+        ["#4f81bd","#f79646","#9bbb59"]
+      );
 
-      const offColors = ["#4f81bd","#f79646","#9bbb59"];
-      const onColors  = ["#4f81bd","#f79646","#9bbb59","#c9c9c9"];
+      const y2 = topY+260;
+      ctx.font="700 20px Arial";
+      ctx.fillText("ONSITE SANITATION", leftX, y2);
 
-      const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-  <rect width="100%" height="100%" fill="#ffffff"/>
+      line("Containment", e.onsite.Containment, y2+40);
+      line("Emptying",    e.onsite.Emptying,    y2+70);
+      line("Treatment",   e.onsite.Treatment,   y2+100);
+      line("Discharge",   e.onsite.Discharge,   y2+130);
+      line("Total",       e.onsite.total,       y2+170, true);
 
-  <text x="${leftX}" y="55" font-family="Arial" font-size="28" font-weight="700">ECAM – SFD + Emissions Summary</text>
+      drawPie(480, y2+110, 90,
+        [e.onsite.Containment, e.onsite.Emptying, e.onsite.Treatment, e.onsite.Discharge],
+        ["#4f81bd","#f79646","#9bbb59","#c9c9c9"]
+      );
 
-  <text x="${leftX}" y="${topY}" font-family="Arial" font-size="18" font-weight="700">OFFSITE SANITATION</text>
-  <text x="${leftX}" y="${topY+30}" font-family="Arial" font-size="16">Collection: ${fmt(e.offsite.Collection)} (${esc(unit)})</text>
-  <text x="${leftX}" y="${topY+55}" font-family="Arial" font-size="16">Transport: ${fmt(e.offsite.Transport)} (${esc(unit)})</text>
-  <text x="${leftX}" y="${topY+80}" font-family="Arial" font-size="16">Treatment: ${fmt(e.offsite.Treatment)} (${esc(unit)})</text>
-  <text x="${leftX}" y="${topY+110}" font-family="Arial" font-size="16" font-weight="700">Total: ${fmt(e.offsite.total)} (${esc(unit)})</text>
+      const img = new Image();
+      img.onload = () => {
+        const boxX = 720, boxY = 140, boxW = 830, boxH = 820;
 
-  <g transform="translate(${leftX+420},${topY+60})">
-    ${makePie(0,0,70,offParts,offColors)}
-  </g>
+        ctx.fillStyle="#000";
+        ctx.font="700 20px Arial";
+        ctx.fillText("SFD graphic", boxX, 120);
 
-  <text x="${leftX}" y="${topY+190}" font-family="Arial" font-size="18" font-weight="700">ONSITE SANITATION</text>
-  <text x="${leftX}" y="${topY+220}" font-family="Arial" font-size="16">Containment: ${fmt(e.onsite.Containment)} (${esc(unit)})</text>
-  <text x="${leftX}" y="${topY+245}" font-family="Arial" font-size="16">Emptying: ${fmt(e.onsite.Emptying)} (${esc(unit)})</text>
-  <text x="${leftX}" y="${topY+270}" font-family="Arial" font-size="16">Treatment: ${fmt(e.onsite.Treatment)} (${esc(unit)})</text>
-  <text x="${leftX}" y="${topY+295}" font-family="Arial" font-size="16">Discharge: ${fmt(e.onsite.Discharge)} (${esc(unit)})</text>
-  <text x="${leftX}" y="${topY+325}" font-family="Arial" font-size="16" font-weight="700">Total: ${fmt(e.onsite.total)} (${esc(unit)})</text>
+        const scale = Math.min(boxW / img.width, boxH / img.height);
+        const dw = img.width * scale;
+        const dh = img.height * scale;
+        const dx = boxX + (boxW - dw)/2;
+        const dy = boxY + (boxH - dh)/2;
 
-  <g transform="translate(${leftX+420},${topY+275})">
-    ${makePie(0,0,70,onParts,onColors)}
-  </g>
+        ctx.strokeStyle="#ddd";
+        ctx.lineWidth=2;
+        ctx.strokeRect(boxX, boxY, boxW, boxH);
 
-  <text x="${rightX}" y="${topY}" font-family="Arial" font-size="18" font-weight="700">SFD graphic</text>
-  <image x="${rightX}" y="${topY+20}" width="630" height="780" preserveAspectRatio="xMidYMid meet" href="${this.sfd_image_dataurl}"/>
-</svg>
-      `.trim();
+        ctx.drawImage(img, dx, dy, dw, dh);
 
-      const blob = new Blob([svg], {type:"image/svg+xml;charset=utf-8"});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "ecam_sfd_export.svg";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url), 1500);
+        canvas.toBlob((blob)=>{
+          if(!blob){
+            alert("Export failed.");
+            return;
+          }
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "ecam_sfd_export.jpg";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url), 1500);
+        }, "image/jpeg", 0.92);
+      };
+      img.onerror = () => alert("Could not load SFD image for export.");
+      img.src = this.sfd_image_dataurl;
     },
 
 get_sfd_emissions(){
@@ -307,7 +335,6 @@ get_sfd_emissions(){
 
     draw_sfd_charts(){
       if(this.current_view!=='sfd') return;
-      if(this.sfd_view_mode==='numbers') return;
 
       const el1 = document.getElementById("chart_sfd_offsite");
       const el2 = document.getElementById("chart_sfd_onsite");
@@ -520,19 +547,9 @@ get_sfd_emissions(){
   watch:{
     current_view(newV){
       if(newV==='sfd'){
-        // always start clean: no cached image
         this.clear_sfd_image();
       }
-      this.$nextTick(()=>{
-        try{
-          if(newV==='sfd') this.draw_sfd_charts();
-        }catch(e){ console.warn(e); }
-      });
-    },
-    sfd_view_mode(){
-      this.$nextTick(()=>{
-        try{ this.draw_sfd_charts(); }catch(e){ console.warn(e); }
-      });
+      this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
     }
   },
 
@@ -1092,13 +1109,10 @@ get_sfd_emissions(){
                     <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
             <div style="display:flex;gap:.75em;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-bottom:.5em;">
               <label style="font-size:.9em;color:#555;">View:
-                <select v-model="sfd_view_mode" style="margin-left:.5em;">
-                  <option value="numbers">Numbers</option>
-                  <option value="charts">Pie charts</option>
-                  <option value="both">Both</option>
-                </select>
+                
               </label>
-              <button @click="download_sfd_svg()">Download image (SVG)</button>
+              <button @click="download_sfd_jpg()">Download JPG</button>
+              <button @click="download_sfd_html()">Download HTML</button>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
@@ -1106,7 +1120,9 @@ get_sfd_emissions(){
                 <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
                 <button v-if="sfd_image_dataurl" @click="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
-              
+              <div style="color:#666; font-size:.9em;">
+                
+              </div>
             </div>
           </div>
 
@@ -1117,7 +1133,7 @@ get_sfd_emissions(){
               <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center; margin-top:1em;">
                 <div>
                   <b>OFFSITE SANITATION</b>
-                  <table v-if="sfd_view_mode!='charts'" class="legend" style="width:100%; margin-top:.5em;">
+                  <table class="legend" style="width:100%; margin-top:.5em;">
                     <tr><td>Collection</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Collection)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Transport</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Transport)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
@@ -1132,7 +1148,7 @@ get_sfd_emissions(){
               <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
                 <div>
                   <b>ONSITE SANITATION</b>
-                  <table v-if="sfd_view_mode!='charts'" class="legend" style="width:100%; margin-top:.5em;">
+                  <table class="legend" style="width:100%; margin-top:.5em;">
                     <tr><td>Containment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Containment)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Emptying</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Emptying)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
@@ -1144,7 +1160,7 @@ get_sfd_emissions(){
               </div>
 
               <div style="margin-top:1em; color:#888; font-size:.9em;">
-                Charts update automatically from the current assessment results.
+                {{translate("")}}
               </div>
             </div>
 
@@ -1152,7 +1168,7 @@ get_sfd_emissions(){
               <div class="chart_title">SFD graphic</div>
               <div style="margin-top:1em;">
                 <div v-if="sfd_image_dataurl">
-                  <img :src="sfd_image_dataurl" style="max-width:100%; height:auto; border:1px solid #ddd;">
+                  <img :src="sfd_image_dataurl" style="max-width:100%; height:auto; display:block; margin:0 auto; border:1px solid #ddd;">
                 </div>
                 <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">
                   No SFD image uploaded yet.
