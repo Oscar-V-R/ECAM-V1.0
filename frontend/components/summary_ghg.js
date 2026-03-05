@@ -988,7 +988,7 @@ get_sfd_emissions(){
   }
 
   return {offsite, onsite, total: offsite.total + onsite.total};
-},,
+},
 
     compare_delta_abs_pct(b,f){
       const B = Number(b||0), F = Number(f||0);
