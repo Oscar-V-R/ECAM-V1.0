@@ -820,25 +820,175 @@ get_sfd_emissions(){
     },
 
     extract_sfd_emissions_from_ecam_json(ecamJson){
-      // Returns {offsite:{Collection,Transport,Treatment,total}, onsite:{Containment,Emptying,Treatment,Discharge,total}, total}
-      const j = ecamJson || {};
+  // Returns {offsite:{Collection,Transport,Treatment,total}, onsite:{Containment,Emptying,Treatment,Discharge,total}, total}
+  // This is UI-only: we try multiple strategies because ECAM exports vary.
+  const j = ecamJson || {};
 
-      const off_col = this._find_number_in_json(j, ["offsite","collection"]);
-      const off_tra = this._find_number_in_json(j, ["offsite","transport"]);
-      const off_tre = this._find_number_in_json(j, ["offsite","treat"]);
-      const on_con  = this._find_number_in_json(j, ["onsite","contain"]);
-      const on_emp  = this._find_number_in_json(j, ["onsite","empty"]);
-      const on_tre  = this._find_number_in_json(j, ["onsite","treat"]);
-      const on_dis  = this._find_number_in_json(j, ["onsite","discharge"]);
+  const toNum = (v)=>{
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
 
-      const offsite = {Collection:off_col, Transport:off_tra, Treatment:off_tre};
-      offsite.total = offsite.Collection + offsite.Transport + offsite.Treatment;
+  // 1) Fast path: common flat keys
+  const tryKeys = (keyList)=>{
+    for(const k of keyList){
+      if(j && typeof j==="object" && j[k]!==undefined && j[k]!==null){
+        const n = toNum(j[k]);
+        if(n!==0) return n;
+      }
+    }
+    return null;
+  };
 
-      const onsite = {Containment:on_con, Emptying:on_emp, Treatment:on_tre, Discharge:on_dis};
-      onsite.total = onsite.Containment + onsite.Emptying + onsite.Treatment + onsite.Discharge;
+  // 2) Deep search by key regex (key contains both concepts in any order)
+  const findByKeyRegex = (regexList)=>{
+    let found = null;
+    const walk=(node)=>{
+      if(node===null || node===undefined) return;
+      if(typeof node==="number") return;
+      if(typeof node==="string") return;
+      if(Array.isArray(node)){ for(const it of node) walk(it); return; }
+      if(typeof node==="object"){
+        for(const k in node){
+          if(!Object.prototype.hasOwnProperty.call(node,k)) continue;
+          const v=node[k];
+          const kL=String(k).toLowerCase();
+          if(typeof v==="number"){
+            for(const rx of regexList){
+              if(rx.test(kL)){ found = Number(v); return; }
+            }
+          }
+          if(found!==null) return;
+          walk(v);
+          if(found!==null) return;
+        }
+      }
+    };
+    walk(j);
+    return (found===null)? null : toNum(found);
+  };
 
-      return {offsite, onsite, total: offsite.total + onsite.total};
-    },
+  // 3) Deep search for {label/name/title/... , value/val/amount/...} style blocks
+  // This catches exports that store results as arrays of labeled items.
+  const findByLabeledValue = (labelTokens, scopeTokens)=>{
+    const lt = (labelTokens||[]).map(t=>String(t).toLowerCase());
+    const st = (scopeTokens||[]).map(t=>String(t).toLowerCase());
+    let best = null;
+
+    const getLabel = (o)=>{
+      if(!o || typeof o!=="object") return "";
+      return String(o.label ?? o.name ?? o.title ?? o.component ?? o.key ?? "").toLowerCase();
+    };
+    const getValue = (o)=>{
+      if(!o || typeof o!=="object") return null;
+      if(typeof o.value==="number") return o.value;
+      if(typeof o.val==="number") return o.val;
+      if(typeof o.amount==="number") return o.amount;
+      if(typeof o.number==="number") return o.number;
+      if(typeof o.result==="number") return o.result;
+      return null;
+    };
+
+    const walk=(node, scopeText)=>{
+      if(node===null || node===undefined) return;
+      if(typeof node==="string" || typeof node==="number") return;
+      if(Array.isArray(node)){
+        for(const it of node) walk(it, scopeText);
+        return;
+      }
+      if(typeof node==="object"){
+        const label = getLabel(node);
+        const nextScope = (scopeText + " " + label).trim();
+
+        const v = getValue(node);
+        if(v!==null){
+          const hay = (nextScope + " " + Object.keys(node).join(" ")).toLowerCase();
+          let ok=true;
+          for(const t of lt){ if(hay.indexOf(t)===-1){ ok=false; break; } }
+          if(ok){
+            for(const sTok of st){ if(hay.indexOf(sTok)===-1){ ok=false; break; } }
+          }
+          if(ok){
+            best = Number(v);
+            return;
+          }
+        }
+
+        for(const k in node){
+          if(!Object.prototype.hasOwnProperty.call(node,k)) continue;
+          walk(node[k], nextScope);
+          if(best!==null) return;
+        }
+      }
+    };
+    walk(j, "");
+    return (best===null)? null : toNum(best);
+  };
+
+  // 4) Fallback to existing token-in-path finder
+  const findTok = (tokens)=>toNum(this._find_number_in_json(j, tokens));
+
+  // ---- COMPONENTS ----
+  // OFFSITE
+  const off_col =
+    tryKeys(["offsite_collection","offsiteCollection","ghg_offsite_collection","collection_offsite"]) ??
+    findByKeyRegex([/offsite.*collection/,/collection.*offsite/]) ??
+    findByLabeledValue(["collection"],["offsite"]) ??
+    findTok(["offsite","collection"]);
+
+  const off_tra =
+    tryKeys(["offsite_transport","offsiteTransport","ghg_offsite_transport","transport_offsite"]) ??
+    findByKeyRegex([/offsite.*transport/,/transport.*offsite/]) ??
+    findByLabeledValue(["transport"],["offsite"]) ??
+    findTok(["offsite","transport"]);
+
+  const off_tre =
+    tryKeys(["offsite_treatment","offsiteTreatment","ghg_offsite_treatment","treatment_offsite"]) ??
+    findByKeyRegex([/offsite.*treat/,/treat.*offsite/]) ??
+    findByLabeledValue(["treat"],["offsite"]) ??
+    findTok(["offsite","treat"]);
+
+  // ONSITE
+  const on_con =
+    tryKeys(["onsite_containment","onsiteContainment","ghg_onsite_containment","containment_onsite"]) ??
+    findByKeyRegex([/onsite.*contain/,/contain.*onsite/]) ??
+    findByLabeledValue(["contain"],["onsite"]) ??
+    findTok(["onsite","contain"]);
+
+  const on_emp =
+    tryKeys(["onsite_emptying","onsiteEmptying","ghg_onsite_emptying","emptying_onsite"]) ??
+    findByKeyRegex([/onsite.*empty/,/empty.*onsite/]) ??
+    findByLabeledValue(["empty"],["onsite"]) ??
+    findTok(["onsite","empty"]);
+
+  const on_tre =
+    tryKeys(["onsite_treatment","onsiteTreatment","ghg_onsite_treatment","treatment_onsite"]) ??
+    findByKeyRegex([/onsite.*treat/,/treat.*onsite/]) ??
+    findByLabeledValue(["treat"],["onsite"]) ??
+    findTok(["onsite","treat"]);
+
+  const on_dis =
+    tryKeys(["onsite_discharge","onsiteDischarge","ghg_onsite_discharge","discharge_onsite"]) ??
+    findByKeyRegex([/onsite.*discharge/,/discharge.*onsite/]) ??
+    findByLabeledValue(["discharge"],["onsite"]) ??
+    findTok(["onsite","discharge"]);
+
+  const offsite = {Collection:toNum(off_col), Transport:toNum(off_tra), Treatment:toNum(off_tre)};
+  offsite.total = offsite.Collection + offsite.Transport + offsite.Treatment;
+
+  const onsite = {Containment:toNum(on_con), Emptying:toNum(on_emp), Treatment:toNum(on_tre), Discharge:toNum(on_dis)};
+  onsite.total = onsite.Containment + onsite.Emptying + onsite.Treatment + onsite.Discharge;
+
+  // If everything is zero, try a last-resort: look for "offsite total" and "onsite total" labels and split unknowns as 0.
+  if(offsite.total===0 && onsite.total===0){
+    const offT = findByLabeledValue(["total"],["offsite"]) ?? findByKeyRegex([/offsite.*total/,/total.*offsite/]);
+    const onT  = findByLabeledValue(["total"],["onsite"])  ?? findByKeyRegex([/onsite.*total/,/total.*onsite/]);
+    if(offT!==null) offsite.total = toNum(offT);
+    if(onT!==null) onsite.total = toNum(onT);
+  }
+
+  return {offsite, onsite, total: offsite.total + onsite.total};
+},,
 
     compare_delta_abs_pct(b,f){
       const B = Number(b||0), F = Number(f||0);
