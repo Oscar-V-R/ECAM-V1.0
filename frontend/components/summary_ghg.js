@@ -15,6 +15,7 @@ let summary_ghg=new Vue({
 
     // --- SFD tab (UI only) ---
     sfd_image_dataurl:null,
+    sfd_view_mode:"both",
 
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
@@ -494,9 +495,6 @@ get_sfd_emissions(){
 
   watch:{
     current_view(newV){
-      if(newV==='sfd'){
-        this.clear_sfd_image();
-      }
       this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
     }
   },
@@ -1087,7 +1085,7 @@ get_sfd_emissions(){
                     <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
                   </table>
                 </div>
-                <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_offsite"></div></div>
+                <div><div id="chart_sfd_offsite"></div></div>
               </div>
 
               <hr style="border-color:#eee; margin:1.2em 0;">
@@ -1103,7 +1101,7 @@ get_sfd_emissions(){
                     <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
                   </table>
                 </div>
-                <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_onsite"></div></div>
+                <div><div id="chart_sfd_onsite"></div></div>
               </div>
 
               <div style="margin-top:1em; color:#888; font-size:.9em;">
