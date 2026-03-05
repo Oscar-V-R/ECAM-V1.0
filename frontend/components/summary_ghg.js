@@ -14,9 +14,7 @@ let summary_ghg=new Vue({
     current_view:"table",
 
     // --- SFD tab (UI only) ---
-    sfd_storage_key:"ecam_sfd_image_v1",
     sfd_image_dataurl:null,
-    sfd_loaded_from_storage:false,
 
     sfd_view_mode:"both", // numbers | charts | both
 
@@ -116,16 +114,6 @@ let summary_ghg=new Vue({
     // ---------------------------
     // SFD tab (UI only)
     // ---------------------------
-    ensure_sfd_loaded(){
-      if(this.sfd_loaded_from_storage) return;
-      this.sfd_loaded_from_storage=true;
-      try{
-        let saved = localStorage.getItem(this.sfd_storage_key);
-        if(saved) this.sfd_image_dataurl = saved;
-      }catch(e){
-        console.warn("SFD localStorage read failed:", e);
-      }
-    },
 
     on_sfd_file_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
@@ -133,131 +121,130 @@ let summary_ghg=new Vue({
 
       const ok = /image\/(png|jpeg)/i.test(file.type);
       if(!ok){
-        alert(this.translate("Please upload a PNG or JPG image."));
+        alert("Please upload a PNG or JPG image.");
         return;
       }
 
       const reader = new FileReader();
       reader.onload = () => {
         this.sfd_image_dataurl = reader.result;
-        try{
-          localStorage.setItem(this.sfd_storage_key, this.sfd_image_dataurl);
-        }catch(e){
-          console.warn("SFD localStorage write failed:", e);
-        }
+        this.$nextTick(()=>this.draw_sfd_charts());
       };
       reader.readAsDataURL(file);
     },
 
     clear_sfd_image(){
       this.sfd_image_dataurl=null;
-      try{ localStorage.removeItem(this.sfd_storage_key); }catch(e){}
+      const a=document.getElementById("chart_sfd_offsite");
+      const b=document.getElementById("chart_sfd_onsite");
+      if(a) a.innerHTML="";
+      if(b) b.innerHTML="";
     },
 
-    // Export SFD + results (UI only) as single file
-    get_sfd_export_node(){
-      return document.getElementById('sfd_export_area');
-    },
 
-    download_sfd_html(){
-      const node = this.get_sfd_export_node();
-      if(!node){
-        alert("SFD export area not found.");
+    
+    // Download a single image (SVG) containing: SFD graphic + emissions numbers + simple pie charts
+    download_sfd_svg(){
+      if(!this.sfd_image_dataurl){
+        alert("Please upload an SFD image first.");
         return;
       }
-      const css = `
-        body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:20px;background:#fff;color:#111}
-        h2,h3{margin:0 0 10px 0}
-        .wrap{max-width:1200px;margin:0 auto}
-        .meta{color:#666;font-size:12px;margin:8px 0 14px 0}
-        .card{border:1px solid #ccc;padding:12px;border-radius:6px}
-        table{border-collapse:collapse;width:100%}
-        td,th{padding:6px 8px;border-bottom:1px solid #eee}
-        img{max-width:100%;height:auto;border:1px solid #ddd}
-      `;
-      const html = `<!doctype html><html><head><meta charset="utf-8"><title>ECAM SFD Export</title><style>${css}</style></head>
-        <body><div class="wrap">
-        <h2>ECAM – SFD + Emissions Summary</h2>
-        <div class="meta">Generated: ${new Date().toISOString()}</div>
-        <div class="card">${node.outerHTML}</div>
-        </div></body></html>`;
-      const blob = new Blob([html], {type:"text/html"});
+
+      const e = this.get_sfd_emissions();
+      const unit = this.current_unit_ghg;
+
+      const W = 1400, H = 900;
+      const leftX = 50, topY = 90;
+      const rightX = 720;
+
+      const esc = (s)=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+      const fmt = (v)=>esc(this.format_emission(v));
+
+      const piePath = (cx, cy, r, start, end) => {
+        const large = (end-start) > Math.PI ? 1 : 0;
+        const x1 = cx + r*Math.cos(start);
+        const y1 = cy + r*Math.sin(start);
+        const x2 = cx + r*Math.cos(end);
+        const y2 = cy + r*Math.sin(end);
+        return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+      };
+
+      const makePie = (cx, cy, r, parts, colors) => {
+        const tot = parts.reduce((p,c)=>p+c.value,0);
+        if(tot<=0){
+          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#eee" />`;
+        }
+        let a = -Math.PI/2;
+        let out = "";
+        parts.forEach((p,i)=>{
+          const frac = p.value/tot;
+          const b = a + frac*2*Math.PI;
+          out += `<path d="${piePath(cx,cy,r,a,b)}" fill="${colors[i]||'#ccc'}"></path>`;
+          a=b;
+        });
+        out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#fff" stroke-width="2"/>`;
+        return out;
+      };
+
+      const offParts = [
+        {label:"Collection", value:e.offsite.Collection},
+        {label:"Transport",  value:e.offsite.Transport},
+        {label:"Treatment",  value:e.offsite.Treatment},
+      ];
+      const onParts = [
+        {label:"Containment", value:e.onsite.Containment},
+        {label:"Emptying",    value:e.onsite.Emptying},
+        {label:"Treatment",   value:e.onsite.Treatment},
+        {label:"Discharge",   value:e.onsite.Discharge},
+      ];
+
+      const offColors = ["#4f81bd","#f79646","#9bbb59"];
+      const onColors  = ["#4f81bd","#f79646","#9bbb59","#c9c9c9"];
+
+      const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+  <rect width="100%" height="100%" fill="#ffffff"/>
+
+  <text x="${leftX}" y="55" font-family="Arial" font-size="28" font-weight="700">ECAM – SFD + Emissions Summary</text>
+
+  <text x="${leftX}" y="${topY}" font-family="Arial" font-size="18" font-weight="700">OFFSITE SANITATION</text>
+  <text x="${leftX}" y="${topY+30}" font-family="Arial" font-size="16">Collection: ${fmt(e.offsite.Collection)} (${esc(unit)})</text>
+  <text x="${leftX}" y="${topY+55}" font-family="Arial" font-size="16">Transport: ${fmt(e.offsite.Transport)} (${esc(unit)})</text>
+  <text x="${leftX}" y="${topY+80}" font-family="Arial" font-size="16">Treatment: ${fmt(e.offsite.Treatment)} (${esc(unit)})</text>
+  <text x="${leftX}" y="${topY+110}" font-family="Arial" font-size="16" font-weight="700">Total: ${fmt(e.offsite.total)} (${esc(unit)})</text>
+
+  <g transform="translate(${leftX+420},${topY+60})">
+    ${makePie(0,0,70,offParts,offColors)}
+  </g>
+
+  <text x="${leftX}" y="${topY+190}" font-family="Arial" font-size="18" font-weight="700">ONSITE SANITATION</text>
+  <text x="${leftX}" y="${topY+220}" font-family="Arial" font-size="16">Containment: ${fmt(e.onsite.Containment)} (${esc(unit)})</text>
+  <text x="${leftX}" y="${topY+245}" font-family="Arial" font-size="16">Emptying: ${fmt(e.onsite.Emptying)} (${esc(unit)})</text>
+  <text x="${leftX}" y="${topY+270}" font-family="Arial" font-size="16">Treatment: ${fmt(e.onsite.Treatment)} (${esc(unit)})</text>
+  <text x="${leftX}" y="${topY+295}" font-family="Arial" font-size="16">Discharge: ${fmt(e.onsite.Discharge)} (${esc(unit)})</text>
+  <text x="${leftX}" y="${topY+325}" font-family="Arial" font-size="16" font-weight="700">Total: ${fmt(e.onsite.total)} (${esc(unit)})</text>
+
+  <g transform="translate(${leftX+420},${topY+275})">
+    ${makePie(0,0,70,onParts,onColors)}
+  </g>
+
+  <text x="${rightX}" y="${topY}" font-family="Arial" font-size="18" font-weight="700">SFD graphic</text>
+  <image x="${rightX}" y="${topY+20}" width="630" height="780" preserveAspectRatio="xMidYMid meet" href="${this.sfd_image_dataurl}"/>
+</svg>
+      `.trim();
+
+      const blob = new Blob([svg], {type:"image/svg+xml;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "ecam_sfd_export.html";
+      a.href = url;
+      a.download = "ecam_sfd_export.svg";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+      setTimeout(()=>URL.revokeObjectURL(url), 1500);
     },
 
-    // Uses SVG foreignObject to rasterize the export area to PNG (works in Chrome)
-    download_sfd_png(){
-      const node = this.get_sfd_export_node();
-      if(!node){
-        alert("SFD export area not found.");
-        return;
-      }
-
-      const rect = node.getBoundingClientRect();
-      const width  = Math.ceil(rect.width);
-      const height = Math.ceil(rect.height);
-
-      // Clone node for export (remove buttons/inputs)
-      const clone = node.cloneNode(true);
-      clone.querySelectorAll("button,input,select").forEach(el=>el.remove());
-
-      const wrapper = document.createElement("div");
-      wrapper.setAttribute("xmlns","http://www.w3.org/1999/xhtml");
-      wrapper.style.width = width+"px";
-      wrapper.style.height = height+"px";
-      wrapper.style.background = "#fff";
-      wrapper.appendChild(clone);
-
-      const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-          <foreignObject width="100%" height="100%">${new XMLSerializer().serializeToString(wrapper)}</foreignObject>
-        </svg>
-      `.trim();
-
-      const svgBlob = new Blob([svg], {type:"image/svg+xml;charset=utf-8"});
-      const url = URL.createObjectURL(svgBlob);
-
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0,0,width,height);
-        ctx.drawImage(img, 0, 0);
-
-        URL.revokeObjectURL(url);
-
-        canvas.toBlob((blob)=>{
-          if(!blob){
-            alert("PNG export failed.");
-            return;
-          }
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = "ecam_sfd_export.png";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
-        }, "image/png");
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        alert("PNG export failed (browser blocked SVG export). Try HTML export.");
-      };
-      img.src = url;
-    },
-
-
-    get_sfd_emissions(){
+get_sfd_emissions(){
       const zeros = {
         offsite:{ Collection:0, Transport:0, Treatment:0, total:0 },
         onsite :{ Containment:0, Emptying:0, Treatment:0, Discharge:0, total:0 },
@@ -319,9 +306,15 @@ let summary_ghg=new Vue({
     },
 
     draw_sfd_charts(){
+      if(this.current_view!=='sfd') return;
+      if(this.sfd_view_mode==='numbers') return;
+
       const el1 = document.getElementById("chart_sfd_offsite");
       const el2 = document.getElementById("chart_sfd_onsite");
       if(!el1 || !el2) return;
+
+      el1.innerHTML="";
+      el2.innerHTML="";
 
       const e = this.get_sfd_emissions();
       const pct = (v, tot) => tot>0 ? (100*v/tot) : 0;
@@ -522,6 +515,25 @@ let summary_ghg=new Vue({
         });
       }
     },
+  },
+
+  watch:{
+    current_view(newV){
+      if(newV==='sfd'){
+        // always start clean: no cached image
+        this.clear_sfd_image();
+      }
+      this.$nextTick(()=>{
+        try{
+          if(newV==='sfd') this.draw_sfd_charts();
+        }catch(e){ console.warn(e); }
+      });
+    },
+    sfd_view_mode(){
+      this.$nextTick(()=>{
+        try{ this.draw_sfd_charts(); }catch(e){ console.warn(e); }
+      });
+    }
   },
 
   template:`
@@ -1077,9 +1089,7 @@ let summary_ghg=new Vue({
         </div>
         <!--SFD-->
         <div v-if="current_view=='sfd'">
-          <span style="display:none">{{ensure_sfd_loaded()}}</span>
-
-          <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
+                    <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
             <div style="display:flex;gap:.75em;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-bottom:.5em;">
               <label style="font-size:.9em;color:#555;">View:
                 <select v-model="sfd_view_mode" style="margin-left:.5em;">
@@ -1088,8 +1098,7 @@ let summary_ghg=new Vue({
                   <option value="both">Both</option>
                 </select>
               </label>
-              <button @click="download_sfd_png()">Download PNG</button>
-              <button @click="download_sfd_html()">Download HTML</button>
+              <button @click="download_sfd_svg()">Download image (SVG)</button>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
@@ -1097,9 +1106,7 @@ let summary_ghg=new Vue({
                 <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
                 <button v-if="sfd_image_dataurl" @click="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
-              <div style="color:#666; font-size:.9em;">
-                The image is saved in your browser and persists after refresh.
-              </div>
+              
             </div>
           </div>
 
@@ -1110,7 +1117,7 @@ let summary_ghg=new Vue({
               <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center; margin-top:1em;">
                 <div>
                   <b>OFFSITE SANITATION</b>
-                  <table class="legend" style="width:100%; margin-top:.5em;">
+                  <table v-if="sfd_view_mode!='charts'" class="legend" style="width:100%; margin-top:.5em;">
                     <tr><td>Collection</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Collection)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Transport</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Transport)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
@@ -1125,7 +1132,7 @@ let summary_ghg=new Vue({
               <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
                 <div>
                   <b>ONSITE SANITATION</b>
-                  <table class="legend" style="width:100%; margin-top:.5em;">
+                  <table v-if="sfd_view_mode!='charts'" class="legend" style="width:100%; margin-top:.5em;">
                     <tr><td>Containment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Containment)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Emptying</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Emptying)}}</b> ({{current_unit_ghg}})</td></tr>
                     <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
@@ -1137,7 +1144,7 @@ let summary_ghg=new Vue({
               </div>
 
               <div style="margin-top:1em; color:#888; font-size:.9em;">
-                {{translate("Charts update automatically from the current assessment results.")}}
+                Charts update automatically from the current assessment results.
               </div>
             </div>
 
@@ -1164,6 +1171,7 @@ let summary_ghg=new Vue({
     this.$nextTick(()=>{
       try{
         _this.draw_all_charts();
+        try{ _this.draw_sfd_charts(); }catch(e){}
       }catch(e){
         console.warn(e);
       }
