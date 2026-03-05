@@ -728,36 +728,51 @@ draw_compare_pies(b,f){
   ];
   ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
 
-  const hasHelper = (window && window.draw_pie_chart);
+  const hasChartsHelper = (typeof Charts!=="undefined" && Charts && typeof Charts.draw_pie_chart==="function");
 
-  const draw = (id, arr)=>{
-    if(hasHelper) return window.draw_pie_chart(id, arr);
-    return this.draw_simple_pie(id, arr);
+  const pct = (v, tot) => (tot>0 ? (100*Number(v||0)/tot) : 0);
+
+  const draw = (id, items, colors)=>{
+    if(hasChartsHelper){
+      // ECAM pie-chart helper expects percentages as values (0–100), same as SFD tab.
+      return Charts.draw_pie_chart(id, items, colors);
+    }
+    // Fallback: our simple SVG pie also expects raw values; we feed percentages for same look.
+    return this.draw_simple_pie(id, items);
   };
 
+  const b_off_tot = Number(b.offsite_collection||0)+Number(b.offsite_transport||0)+Number(b.offsite_treatment||0);
+  const b_on_tot  = Number(b.onsite_containment||0)+Number(b.onsite_emptying||0)+Number(b.onsite_treatment||0)+Number(b.onsite_discharge||0);
+
+  const f_off_tot = Number(f.offsite_collection||0)+Number(f.offsite_transport||0)+Number(f.offsite_treatment||0);
+  const f_on_tot  = Number(f.onsite_containment||0)+Number(f.onsite_emptying||0)+Number(f.onsite_treatment||0)+Number(f.onsite_discharge||0);
+
+  // Same labels + same colors + same "percentage values" as in the SFD tab
   draw("chart_compare_baseline_offsite", [
-    {label:"Collection", value:b.offsite_collection},
-    {label:"Transport",  value:b.offsite_transport},
-    {label:"Treatment",  value:b.offsite_treatment},
-  ]);
+    {label:"Collection", value:pct(b.offsite_collection, b_off_tot)},
+    {label:"Transport",  value:pct(b.offsite_transport,  b_off_tot)},
+    {label:"Treatment",  value:pct(b.offsite_treatment,  b_off_tot)},
+  ], ["#4f81bd", "#f79646", "#9bbb59"]);
+
   draw("chart_compare_baseline_onsite", [
-    {label:"Containment", value:b.onsite_containment},
-    {label:"Emptying",    value:b.onsite_emptying},
-    {label:"Treatment",   value:b.onsite_treatment},
-    {label:"Discharge",   value:b.onsite_discharge},
-  ]);
+    {label:"Containment", value:pct(b.onsite_containment, b_on_tot)},
+    {label:"Emptying",    value:pct(b.onsite_emptying,    b_on_tot)},
+    {label:"Treatment",   value:pct(b.onsite_treatment,   b_on_tot)},
+    {label:"Discharge",   value:pct(b.onsite_discharge,   b_on_tot)},
+  ], ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"]);
 
   draw("chart_compare_future_offsite", [
-    {label:"Collection", value:f.offsite_collection},
-    {label:"Transport",  value:f.offsite_transport},
-    {label:"Treatment",  value:f.offsite_treatment},
-  ]);
+    {label:"Collection", value:pct(f.offsite_collection, f_off_tot)},
+    {label:"Transport",  value:pct(f.offsite_transport,  f_off_tot)},
+    {label:"Treatment",  value:pct(f.offsite_treatment,  f_off_tot)},
+  ], ["#4f81bd", "#f79646", "#9bbb59"]);
+
   draw("chart_compare_future_onsite", [
-    {label:"Containment", value:f.onsite_containment},
-    {label:"Emptying",    value:f.onsite_emptying},
-    {label:"Treatment",   value:f.onsite_treatment},
-    {label:"Discharge",   value:f.onsite_discharge},
-  ]);
+    {label:"Containment", value:pct(f.onsite_containment, f_on_tot)},
+    {label:"Emptying",    value:pct(f.onsite_emptying,    f_on_tot)},
+    {label:"Treatment",   value:pct(f.onsite_treatment,   f_on_tot)},
+    {label:"Discharge",   value:pct(f.onsite_discharge,   f_on_tot)},
+  ], ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"]);
 },
 
 
