@@ -23,6 +23,8 @@ let summary_ghg=new Vue({
     compare_future_raw:null,
     compare_baseline_sfd:null,
     compare_future_sfd:null,
+    compare_emissions_baseline:null,
+    compare_emissions_future:null,
     compare_error:"",
     compare_result_ready:false,
     compare_rows_offsite:[],
@@ -755,7 +757,6 @@ get_sfd_emissions(){
       const seen = new Set();
       const walk = (x)=>{
         if(x===null || x===undefined) return null;
-        if(typeof x === "number" && isFinite(x)) return null; // plain numbers without key context ignored
         if(typeof x !== "object") return null;
         if(seen.has(x)) return null;
         seen.add(x);
@@ -768,15 +769,16 @@ get_sfd_emissions(){
           return null;
         }
 
-        // object
+        // object: check direct keys
         for(const k of Object.keys(x)){
-          const kl = String(k).toLowerCase();
-          const v = x[k];
-          if(targets.includes(kl)){
+          const lk = String(k).toLowerCase();
+          if(targets.includes(lk)){
+            const v = x[k];
             const num = Number(v);
             if(isFinite(num)) return num;
           }
         }
+
         // recurse
         for(const k of Object.keys(x)){
           const r = walk(x[k]);
@@ -787,21 +789,106 @@ get_sfd_emissions(){
       return walk(obj);
     },
 
+    _deepFindFirstNumberByAllTokens(obj, tokens){
+      // tokens: e.g., ["offsite","collection"] -> finds any key containing all tokens (case-insensitive)
+      const toks = (tokens||[]).map(t=>String(t).toLowerCase()).filter(Boolean);
+      const seen = new Set();
+      const walk = (x)=>{
+        if(x===null || x===undefined) return null;
+        if(typeof x !== "object") return null;
+        if(seen.has(x)) return null;
+        seen.add(x);
+
+        if(Array.isArray(x)){
+          for(const it of x){
+            const r = walk(it);
+            if(typeof r === "number") return r;
+          }
+          return null;
+        }
+
+        for(const k of Object.keys(x)){
+          const lk = String(k).toLowerCase();
+          let ok = true;
+          for(const t of toks){
+            if(!lk.includes(t)){ ok=false; break; }
+          }
+          if(ok){
+            const num = Number(x[k]);
+            if(isFinite(num)) return num;
+          }
+        }
+
+        // common pattern: {label/name: "...", value: 123}
+        const label = (x.label ?? x.name ?? x.title ?? x.component ?? x.key ?? "");
+        const value = (x.value ?? x.val ?? x.amount ?? x.number);
+        if(typeof label === "string" && value !== undefined){
+          const ll = label.toLowerCase();
+          let ok = true;
+          for(const t of toks){
+            if(!ll.includes(t)){ ok=false; break; }
+          }
+          if(ok){
+            const num = Number(value);
+            if(isFinite(num)) return num;
+          }
+        }
+
+        for(const k of Object.keys(x)){
+          const r = walk(x[k]);
+          if(typeof r === "number") return r;
+        }
+        return null;
+      };
+      return walk(obj);
+    },
+    },
+
     _extract_emissions_from_ecam_json(raw){
-      // Robust extraction: tries multiple key variants across nested JSON.
-      const get = (keys)=>{
+      // Robust extraction: supports multiple ECAM export shapes.
+      const getExact = (keys)=>{
         const v = this._deepFindFirstNumberByKey(raw, keys);
         return (typeof v === "number" && isFinite(v)) ? v : 0;
       };
+      const getTokens = (tokens)=>{
+        const v = this._deepFindFirstNumberByAllTokens(raw, tokens);
+        return (typeof v === "number" && isFinite(v)) ? v : 0;
+      };
+      const get = (keys, tokens)=>{
+        let v = getExact(keys);
+        if(v===0 && tokens && tokens.length) v = getTokens(tokens);
+        return v;
+      };
 
-      const off_collection = get(["offsite_collection","offsiteCollection","offsite_collect","collection_offsite","ghg_offsite_collection"]);
-      const off_transport  = get(["offsite_transport","offsiteTransport","offsite_trans","transport_offsite","ghg_offsite_transport"]);
-      const off_treatment  = get(["offsite_treatment","offsiteTreatment","offsite_treat","treatment_offsite","ghg_offsite_treatment"]);
+      const off_collection = get(
+        ["offsite_collection","offsiteCollection","offsite_collect","collection_offsite","ghg_offsite_collection","collectionOffsite","offsiteCollectionEmissions"],
+        ["offsite","collection"]
+      );
+      const off_transport  = get(
+        ["offsite_transport","offsiteTransport","offsite_trans","transport_offsite","ghg_offsite_transport","transportOffsite","offsiteTransportEmissions"],
+        ["offsite","transport"]
+      );
+      const off_treatment  = get(
+        ["offsite_treatment","offsiteTreatment","offsite_treat","treatment_offsite","ghg_offsite_treatment","treatmentOffsite","offsiteTreatmentEmissions"],
+        ["offsite","treatment"]
+      );
 
-      const on_containment = get(["onsite_containment","onsiteContainment","onsite_contain","containment_onsite","ghg_onsite_containment"]);
-      const on_emptying    = get(["onsite_emptying","onsiteEmptying","emptying_onsite","ghg_onsite_emptying"]);
-      const on_treatment   = get(["onsite_treatment","onsiteTreatment","onsite_treat","treatment_onsite","ghg_onsite_treatment"]);
-      const on_discharge   = get(["onsite_discharge","onsiteDischarge","discharge_onsite","ghg_onsite_discharge"]);
+      const on_containment = get(
+        ["onsite_containment","onsiteContainment","onsite_contain","containment_onsite","ghg_onsite_containment","containmentOnsite","onsiteContainmentEmissions"],
+        ["onsite","containment"]
+      );
+      const on_emptying    = get(
+        ["onsite_emptying","onsiteEmptying","emptying_onsite","ghg_onsite_emptying","emptyingOnsite","onsiteEmptyingEmissions"],
+        ["onsite","emptying"]
+      );
+      const on_treatment   = get(
+        ["onsite_treatment","onsiteTreatment","onsite_treat","treatment_onsite","ghg_onsite_treatment","treatmentOnsite","onsiteTreatmentEmissions"],
+        ["onsite","treatment"]
+      );
+      const on_discharge   = get(
+        ["onsite_discharge","onsiteDischarge","discharge_onsite","ghg_onsite_discharge","dischargeOnsite","onsiteDischargeEmissions"],
+        ["onsite","discharge"]
+      );
 
       const off_total = off_collection + off_transport + off_treatment;
       const on_total  = on_containment + on_emptying + on_treatment + on_discharge;
@@ -820,6 +907,54 @@ get_sfd_emissions(){
       return {label, baseline:(b||0), future:(f||0), diff, pct};
     },
 
+    draw_compare_pies(){
+      // Draw baseline/future pie charts in Compare tab (if chart helper exists).
+      try{
+        if(!this.compare_result_ready) return;
+        if(!(this.compare_emissions_baseline && this.compare_emissions_future)) return;
+        if(!(window.Charts && Charts.draw_pie_chart)) return;
+
+        const B = this.compare_emissions_baseline;
+        const F = this.compare_emissions_future;
+
+        const pct = (v, tot)=> tot>0 ? (100*v/tot) : 0;
+
+        const bOff = [
+          ["Collection", B.offsite.Collection, pct(B.offsite.Collection, B.offsite.total)],
+          ["Transport",  B.offsite.Transport,  pct(B.offsite.Transport,  B.offsite.total)],
+          ["Treatment",  B.offsite.Treatment,  pct(B.offsite.Treatment,  B.offsite.total)],
+        ];
+        const bOn = [
+          ["Containment", B.onsite.Containment, pct(B.onsite.Containment, B.onsite.total)],
+          ["Emptying",    B.onsite.Emptying,    pct(B.onsite.Emptying,    B.onsite.total)],
+          ["Treatment",   B.onsite.Treatment,   pct(B.onsite.Treatment,   B.onsite.total)],
+          ["Discharge",   B.onsite.Discharge,   pct(B.onsite.Discharge,   B.onsite.total)],
+        ];
+        const fOff = [
+          ["Collection", F.offsite.Collection, pct(F.offsite.Collection, F.offsite.total)],
+          ["Transport",  F.offsite.Transport,  pct(F.offsite.Transport,  F.offsite.total)],
+          ["Treatment",  F.offsite.Treatment,  pct(F.offsite.Treatment,  F.offsite.total)],
+        ];
+        const fOn = [
+          ["Containment", F.onsite.Containment, pct(F.onsite.Containment, F.onsite.total)],
+          ["Emptying",    F.onsite.Emptying,    pct(F.onsite.Emptying,    F.onsite.total)],
+          ["Treatment",   F.onsite.Treatment,   pct(F.onsite.Treatment,   F.onsite.total)],
+          ["Discharge",   F.onsite.Discharge,   pct(F.onsite.Discharge,   F.onsite.total)],
+        ];
+
+        // clear containers
+        const ids = ["chart_compare_baseline_offsite","chart_compare_baseline_onsite","chart_compare_future_offsite","chart_compare_future_onsite"];
+        ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
+
+        Charts.draw_pie_chart("chart_compare_baseline_offsite", bOff);
+        Charts.draw_pie_chart("chart_compare_baseline_onsite",  bOn);
+        Charts.draw_pie_chart("chart_compare_future_offsite",   fOff);
+        Charts.draw_pie_chart("chart_compare_future_onsite",    fOn);
+      }catch(e){
+        console.warn(e);
+      }
+    },
+
     compute_compare(){
       try{
         this.compare_error = "";
@@ -832,6 +967,8 @@ get_sfd_emissions(){
 
         const B = this._extract_emissions_from_ecam_json(this.compare_baseline_raw);
         const F = this._extract_emissions_from_ecam_json(this.compare_future_raw);
+        this.compare_emissions_baseline = B;
+        this.compare_emissions_future = F;
 
         this.compare_rows_offsite = [
           this._mk_row("Collection", B.offsite.Collection, F.offsite.Collection),
@@ -851,6 +988,7 @@ get_sfd_emissions(){
         this.compare_total = this._mk_row("Total (offsite+onsite)", B.total, F.total);
 
         this.compare_result_ready = true;
+        this.$nextTick(()=>{ try{ this.draw_compare_pies(); }catch(e){} });
       }catch(e){
         console.warn(e);
         this.compare_error = "Comparison failed (could not parse emissions from the provided JSON files).";
@@ -1569,9 +1707,41 @@ get_sfd_emissions(){
                   <td style="text-align:right; padding-top:.9em;">{{format_emission(compare_total.diff)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
                   <td style="text-align:right; padding-top:.9em;">{{ compare_total.pct===null ? '-' : format(compare_total.pct,1,1)+'%' }}</td>
                 </tr>
-              </table>
+              
+</table>
+
+              <div v-if="compare_result_ready" style="margin-top:1em; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1em;" id="compare_pies_grid">
+                <div class="chart_container" style="border:1px solid #eee;">
+                  <div class="chart_title">Baseline – emissions composition</div>
+                  <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1em;">
+                    <div>
+                      <div style="font-weight:700; margin-bottom:.5em;">Offsite</div>
+                      <div id="chart_compare_baseline_offsite"></div>
+                    </div>
+                    <div>
+                      <div style="font-weight:700; margin-bottom:.5em;">Onsite</div>
+                      <div id="chart_compare_baseline_onsite"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="chart_container" style="border:1px solid #eee;">
+                  <div class="chart_title">Future 2040 – emissions composition</div>
+                  <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1em;">
+                    <div>
+                      <div style="font-weight:700; margin-bottom:.5em;">Offsite</div>
+                      <div id="chart_compare_future_offsite"></div>
+                    </div>
+                    <div>
+                      <div style="font-weight:700; margin-bottom:.5em;">Onsite</div>
+                      <div id="chart_compare_future_onsite"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <div style="margin-top:1em; display:grid; grid-template-columns:50% 50%; gap:1em;" v-if="compare_baseline_sfd || compare_future_sfd">
+
                 <div class="chart_container" style="border:1px solid #eee;">
                   <div class="chart_title">Baseline SFD</div>
                   <div style="margin-top:1em;">
@@ -1701,6 +1871,12 @@ get_sfd_emissions(){
         display:grid;
         align-items:center;
         grid-template-columns:15% 85%;
+      }
+
+      /* Compare pies layout */
+      #compare_pies_grid > div{ min-width:0; }
+      @media (max-width: 900px){
+        #compare_pies_grid{ grid-template-columns:1fr !important; }
       }
     </style>
   `,
