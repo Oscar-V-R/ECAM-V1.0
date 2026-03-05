@@ -568,7 +568,7 @@ get_sfd_emissions(){
         <button @click="current_view='charts_ghg'" :selected="current_view=='charts_ghg'" >{{translate("Charts GHG")                }}</button>
         <button @click="current_view='charts_nrg'" :selected="current_view=='charts_nrg'" >{{translate("Charts Energy")             }}</button>
         <button @click="current_view='charts_pop'" :selected="current_view=='charts_pop'" >{{translate("Charts Serviced population")}}</button>
-        <button @click="current_view=\'sfd\'" :selected="current_view==\'sfd\'" >{{translate("SFD")}}</button>
+        <button @click="current_view='sfd'" :selected="current_view=='sfd'" >SFD</button>
         <hr style="border-color:#eee">
         <div>
           <tutorial_tip
@@ -1112,8 +1112,7 @@ get_sfd_emissions(){
                 
               </label>
               <button @click="download_sfd_jpg()">Download JPG</button>
-              <button @click="download_sfd_html()">Download HTML</button>
-            </div>
+</div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
                 <b>Upload SFD graphic</b><br>
