@@ -1,46 +1,4 @@
-l
-    draw_compare_pies(B, F){
-      try{
-        // Requires ECAM's draw_pie_chart helper. If not present, do nothing (no crash).
-        if(!(window && window.draw_pie_chart)) return;
-
-        // Clear containers
-        const ids = ["chart_compare_baseline_offsite","chart_compare_baseline_onsite","chart_compare_future_offsite","chart_compare_future_onsite"];
-        ids.forEach(id=>{
-          const el = document.getElementById(id);
-          if(el) el.innerHTML = "";
-        });
-
-        // Baseline
-        window.draw_pie_chart("chart_compare_baseline_offsite", [
-          {label:"Collection", value:B.offsite.Collection},
-          {label:"Transport",  value:B.offsite.Transport},
-          {label:"Treatment",  value:B.offsite.Treatment},
-        ]);
-        window.draw_pie_chart("chart_compare_baseline_onsite", [
-          {label:"Containment", value:B.onsite.Containment},
-          {label:"Emptying",    value:B.onsite.Emptying},
-          {label:"Treatment",   value:B.onsite.Treatment},
-          {label:"Discharge",   value:B.onsite.Discharge},
-        ]);
-
-        // Future
-        window.draw_pie_chart("chart_compare_future_offsite", [
-          {label:"Collection", value:F.offsite.Collection},
-          {label:"Transport",  value:F.offsite.Transport},
-          {label:"Treatment",  value:F.offsite.Treatment},
-        ]);
-        window.draw_pie_chart("chart_compare_future_onsite", [
-          {label:"Containment", value:F.onsite.Containment},
-          {label:"Emptying",    value:F.onsite.Emptying},
-          {label:"Treatment",   value:F.onsite.Treatment},
-          {label:"Discharge",   value:F.onsite.Discharge},
-        ]);
-      }catch(e){
-        console.warn("compare pie charts failed", e);
-      }
-    },
-et summary_ghg=new Vue({
+let summary_ghg=new Vue({
   el:"#summary_ghg",
   data:{
     visible:false,
@@ -60,16 +18,15 @@ et summary_ghg=new Vue({
     sfd_view_mode:"both",
 
 
-    // SFD Compare (file-based, no local storage)
-    compare_baseline_raw:null,
-    compare_future_raw:null,
+    // --- SFD Compare (uploads) ---
+    compare_baseline_json:null,
+    compare_future_json:null,
     compare_baseline_sfd:null,
     compare_future_sfd:null,
-    compare_error:"",
-    compare_result_ready:false,
-    compare_rows_offsite:[],
-    compare_rows_onsite:[],
-    compare_total:{baseline:0,future:0,diff:0,pct:null},
+    compare_B:null,
+    compare_F:null,
+    compare_rows:null,
+    compare_msg:"",
 
     // SFD persistence / comparison
     sfd_assessment_key:"",
@@ -722,290 +679,252 @@ get_sfd_emissions(){
       }
     },
 
-    // ----------
-    // SFD Compare (file-based)
-    // ----------
-    on_compare_baseline_json(ev){
+    // ---------------------------
+    // SFD Compare (upload 2 ECAM JSON + optional 2 SFD images)
+    // ---------------------------
+
+    on_compare_baseline_json_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
       if(!file) return;
-      const reader = new FileReader();
-      reader.onload = (e)=>{
+      const r = new FileReader();
+      r.onload = (e)=>{
         try{
-          this.compare_baseline_raw = JSON.parse(e.target.result);
-          this.compare_error = "";
-          this.compare_result_ready = false;
+          this.compare_baseline_json = JSON.parse(String(e.target.result||"{}"));
+          this.compare_msg = "Baseline ECAM JSON loaded.";
         }catch(err){
           console.warn(err);
-          this.compare_baseline_raw = null;
-          this.compare_error = "Could not read Baseline JSON (invalid JSON).";
-          this.compare_result_ready = false;
+          this.compare_baseline_json = null;
+          this.compare_msg = "Baseline JSON could not be read.";
         }
       };
-      reader.readAsText(file);
+      r.readAsText(file);
     },
 
-    on_compare_future_json(ev){
+    on_compare_future_json_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
       if(!file) return;
-      const reader = new FileReader();
-      reader.onload = (e)=>{
+      const r = new FileReader();
+      r.onload = (e)=>{
         try{
-          this.compare_future_raw = JSON.parse(e.target.result);
-          this.compare_error = "";
-          this.compare_result_ready = false;
+          this.compare_future_json = JSON.parse(String(e.target.result||"{}"));
+          this.compare_msg = "Future ECAM JSON loaded.";
         }catch(err){
           console.warn(err);
-          this.compare_future_raw = null;
-          this.compare_error = "Could not read Future JSON (invalid JSON).";
-          this.compare_result_ready = false;
+          this.compare_future_json = null;
+          this.compare_msg = "Future JSON could not be read.";
         }
       };
-      reader.readAsText(file);
+      r.readAsText(file);
     },
 
-    on_compare_baseline_sfd(ev){
+    on_compare_baseline_sfd_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
       if(!file) return;
-      const reader = new FileReader();
-      reader.onload = (e)=>{ this.compare_baseline_sfd = e.target.result; };
-      reader.readAsDataURL(file);
+      const r = new FileReader();
+      r.onload = (e)=>{ this.compare_baseline_sfd = e.target.result; };
+      r.readAsDataURL(file);
     },
 
-    on_compare_future_sfd(ev){
+    on_compare_future_sfd_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
       if(!file) return;
-      const reader = new FileReader();
-      reader.onload = (e)=>{ this.compare_future_sfd = e.target.result; };
-      reader.readAsDataURL(file);
+      const r = new FileReader();
+      r.onload = (e)=>{ this.compare_future_sfd = e.target.result; };
+      r.readAsDataURL(file);
     },
 
-    clear_compare_inputs(){
-      this.compare_baseline_raw = null;
-      this.compare_future_raw = null;
+    clear_compare_uploads(){
+      this.compare_baseline_json = null;
+      this.compare_future_json = null;
       this.compare_baseline_sfd = null;
       this.compare_future_sfd = null;
-      this.compare_rows_offsite = [];
-      this.compare_rows_onsite = [];
-      this.compare_total = {baseline:0,future:0,diff:0,pct:null};
-      this.compare_result_ready = false;
-      this.compare_error = "";
-    },
-
-    _deepFindFirstNumberByKey(obj, keyCandidates){
-      // keyCandidates: array of strings; case-insensitive exact match on object keys
-      const targets = (keyCandidates||[]).map(s=>String(s).toLowerCase());
-      const seen = new Set();
-      const walk = (x)=>{
-        if(x===null || x===undefined) return null;
-        if(typeof x === "number" && isFinite(x)) return null; // plain numbers without key context ignored
-        if(typeof x !== "object") return null;
-        if(seen.has(x)) return null;
-        seen.add(x);
-
-        if(Array.isArray(x)){
-          for(const it of x){
-            const r = walk(it);
-            if(typeof r === "number") return r;
-          }
-          return null;
-        }
-
-        // object
-        for(const k of Object.keys(x)){
-          const kl = String(k).toLowerCase();
-          const v = x[k];
-          if(targets.includes(kl)){
-            const num = Number(v);
-            if(isFinite(num)) return num;
-          }
-        }
-        // recurse
-        for(const k of Object.keys(x)){
-          const r = walk(x[k]);
-          if(typeof r === "number") return r;
-        }
-        return null;
-      };
-      return walk(obj);
-    },
-
-    _extract_emissions_from_ecam_json(raw){
-      // VERY robust extraction for ECAM JSON exports.
-      // Supports:
-      // - flat keys: offsite_collection
-      // - nested keys anywhere
-      // - keys with different separators/casing
-      // - {label:"...", value:123} style entries (common in exports)
-      //
-      // We intentionally only READ numbers. We do not change any ECAM calculations.
-
-      const safeNum = (v)=>{
-        const n = Number(v);
-        return (isFinite(n) ? n : null);
-      };
-
-      const seen = new Set();
-
-      const keyHasAllTokens = (k, tokens)=>{
-        const kl = String(k||"").toLowerCase();
-        return tokens.every(t=>kl.includes(t));
-      };
-
-      // Find a number by:
-      // 1) exact key candidates (case-insensitive)
-      // 2) token match on key name
-      // 3) label/value pair where label matches tokens
-      const deepFind = (obj, exactKeys, tokenGroups)=>{
-        const exact = (exactKeys||[]).map(s=>String(s).toLowerCase());
-
-        const walk = (x)=>{
-          if(x===null || x===undefined) return null;
-          if(typeof x !== "object") return null;
-          if(seen.has(x)) return null;
-          seen.add(x);
-
-          if(Array.isArray(x)){
-            for(const it of x){
-              const r = walk(it);
-              if(typeof r === "number") return r;
-            }
-            return null;
-          }
-
-          // 3) label/value objects
-          if(("label" in x) && ("value" in x)){
-            const lab = String(x.label||"").toLowerCase();
-            const val = safeNum(x.value);
-            if(val!==null){
-              for(const tg of (tokenGroups||[])){
-                const ok = tg.every(t=>lab.includes(t));
-                if(ok) return val;
-              }
-            }
-          }
-
-          // 1) exact keys
-          for(const k of Object.keys(x)){
-            const kl = String(k).toLowerCase();
-            if(exact.includes(kl)){
-              const n = safeNum(x[k]);
-              if(n!==null) return n;
-            }
-          }
-
-          // 2) token match on key name
-          for(const k of Object.keys(x)){
-            for(const tg of (tokenGroups||[])){
-              if(keyHasAllTokens(k, tg)){
-                const n = safeNum(x[k]);
-                if(n!==null) return n;
-              }
-            }
-          }
-
-          // recurse
-          for(const k of Object.keys(x)){
-            const r = walk(x[k]);
-            if(typeof r === "number") return r;
-          }
-          return null;
-        };
-
-        // clear cycle set per query
-        seen.clear();
-        return walk(obj);
-      };
-
-      const get = (exactKeys, tokenGroups)=>{
-        const v = deepFind(raw, exactKeys, tokenGroups);
-        return (typeof v === "number" && isFinite(v)) ? v : 0;
-      };
-
-      // Offsite
-      const off_collection = get(
-        ["offsite_collection","offsiteCollection","ghg_offsite_collection"],
-        [["offsite","collection"],["off-site","collection"],["collection","offsite"],["collection","off-site"]]
-      );
-      const off_transport  = get(
-        ["offsite_transport","offsiteTransport","ghg_offsite_transport"],
-        [["offsite","transport"],["off-site","transport"],["transport","offsite"],["transport","off-site"]]
-      );
-      const off_treatment  = get(
-        ["offsite_treatment","offsiteTreatment","ghg_offsite_treatment"],
-        [["offsite","treatment"],["off-site","treatment"],["treatment","offsite"],["treatment","off-site"]]
-      );
-
-      // Onsite
-      const on_containment = get(
-        ["onsite_containment","onsiteContainment","ghg_onsite_containment"],
-        [["onsite","contain"],["on-site","contain"],["contain","onsite"],["contain","on-site"],["containment","onsite"],["containment","on-site"]]
-      );
-      const on_emptying    = get(
-        ["onsite_emptying","onsiteEmptying","ghg_onsite_emptying"],
-        [["onsite","empty"],["on-site","empty"],["empty","onsite"],["empty","on-site"],["emptying","onsite"],["emptying","on-site"]]
-      );
-      const on_treatment   = get(
-        ["onsite_treatment","onsiteTreatment","ghg_onsite_treatment"],
-        [["onsite","treatment"],["on-site","treatment"],["treatment","onsite"],["treatment","on-site"]]
-      );
-      const on_discharge   = get(
-        ["onsite_discharge","onsiteDischarge","ghg_onsite_discharge"],
-        [["onsite","discharge"],["on-site","discharge"],["discharge","onsite"],["discharge","on-site"]]
-      );
-
-      const off_total = off_collection + off_transport + off_treatment;
-      const on_total  = on_containment + on_emptying + on_treatment + on_discharge;
-      const total = off_total + on_total;
-
-      return {
-        offsite:{Collection:off_collection, Transport:off_transport, Treatment:off_treatment, total:off_total},
-        onsite:{Containment:on_containment, Emptying:on_emptying, Treatment:on_treatment, Discharge:on_discharge, total:on_total},
-        total
-      };
-    },
-
-    _mk_row(label, b, f){
-      const diff = (f||0) - (b||0);
-      const pct = (b!==0) ? (100*diff/b) : null;
-      return {label, baseline:(b||0), future:(f||0), diff, pct};
-    },
-
-    compute_compare(){
+      this.compare_B = null;
+      this.compare_F = null;
+      this.compare_rows = null;
+      this.compare_msg = "";
       try{
-        this.compare_error = "";
-        this.compare_result_ready = false;
+        ["chart_compare_baseline_offsite","chart_compare_baseline_onsite","chart_compare_future_offsite","chart_compare_future_onsite"].forEach(id=>{
+          const el=document.getElementById(id); if(el) el.innerHTML="";
+        });
+      }catch(e){}
+    },
 
-        if(!this.compare_baseline_raw || !this.compare_future_raw){
-          this.compare_error = "Please upload both Baseline and Future ECAM JSON files.";
+    // Robust-ish extractor: finds numeric values by trying common ECAM keys anywhere in the JSON
+    _find_number_in_json(obj, keyTokens){
+      // keyTokens: array of strings that must appear (case-insensitive) in the path/key label
+      const tokens = (keyTokens||[]).map(t=>String(t).toLowerCase());
+      let best = null;
+
+      const walk = (node, path)=>{
+        if(node===null || node===undefined) return;
+        const t = typeof node;
+
+        if(t==="number"){
+          // numbers alone not useful without key context
           return;
         }
 
-        const B = this._extract_emissions_from_ecam_json(this.compare_baseline_raw);
-        const F = this._extract_emissions_from_ecam_json(this.compare_future_raw);
+        if(t==="string"){
+          return;
+        }
 
-        this.compare_rows_offsite = [
-          this._mk_row("Collection", B.offsite.Collection, F.offsite.Collection),
-          this._mk_row("Transport",  B.offsite.Transport,  F.offsite.Transport),
-          this._mk_row("Treatment",  B.offsite.Treatment,  F.offsite.Treatment),
-          this._mk_row("Total offsite", B.offsite.total, F.offsite.total),
-        ];
+        if(Array.isArray(node)){
+          for(let i=0;i<node.length;i++) walk(node[i], path+"["+i+"]");
+          return;
+        }
 
-        this.compare_rows_onsite = [
-          this._mk_row("Containment", B.onsite.Containment, F.onsite.Containment),
-          this._mk_row("Emptying",    B.onsite.Emptying,    F.onsite.Emptying),
-          this._mk_row("Treatment",   B.onsite.Treatment,   F.onsite.Treatment),
-          this._mk_row("Discharge",   B.onsite.Discharge,   F.onsite.Discharge),
-          this._mk_row("Total onsite", B.onsite.total, F.onsite.total),
-        ];
+        if(t==="object"){
+          for(const k in node){
+            if(!Object.prototype.hasOwnProperty.call(node,k)) continue;
+            const v=node[k];
+            const kLower=String(k).toLowerCase();
+            const path2 = path ? (path+"."+kLower) : kLower;
 
-        this.compare_total = this._mk_row("Total (offsite+onsite)", B.total, F.total);
+            // case 1: direct numeric under a matching key
+            if(typeof v==="number"){
+              let ok=true;
+              for(const tok of tokens){
+                if(path2.indexOf(tok)===-1){ ok=false; break; }
+              }
+              if(ok){
+                best = v;
+                return;
+              }
+            }
 
-        this.compare_result_ready = true;
-        this.$nextTick(()=>{ this.draw_compare_pies(B,F); });
+            // case 2: {label,value} objects
+            if(v && typeof v==="object" && !Array.isArray(v)){
+              // if it has "value" numeric
+              if(typeof v.value==="number"){
+                const label = String(v.label||k||"").toLowerCase();
+                const combined = (path2+" "+label);
+                let ok=true;
+                for(const tok of tokens){
+                  if(combined.indexOf(tok)===-1){ ok=false; break; }
+                }
+                if(ok){
+                  best = v.value;
+                  return;
+                }
+              }
+            }
+
+            walk(v, path2);
+            if(best!==null) return;
+          }
+        }
+      };
+
+      try{ walk(obj,""); }catch(e){}
+      return (best===null || best===undefined) ? 0 : Number(best||0);
+    },
+
+    extract_sfd_emissions_from_ecam_json(ecamJson){
+      // Returns {offsite:{Collection,Transport,Treatment,total}, onsite:{Containment,Emptying,Treatment,Discharge,total}, total}
+      const j = ecamJson || {};
+
+      const off_col = this._find_number_in_json(j, ["offsite","collection"]);
+      const off_tra = this._find_number_in_json(j, ["offsite","transport"]);
+      const off_tre = this._find_number_in_json(j, ["offsite","treat"]);
+      const on_con  = this._find_number_in_json(j, ["onsite","contain"]);
+      const on_emp  = this._find_number_in_json(j, ["onsite","empty"]);
+      const on_tre  = this._find_number_in_json(j, ["onsite","treat"]);
+      const on_dis  = this._find_number_in_json(j, ["onsite","discharge"]);
+
+      const offsite = {Collection:off_col, Transport:off_tra, Treatment:off_tre};
+      offsite.total = offsite.Collection + offsite.Transport + offsite.Treatment;
+
+      const onsite = {Containment:on_con, Emptying:on_emp, Treatment:on_tre, Discharge:on_dis};
+      onsite.total = onsite.Containment + onsite.Emptying + onsite.Treatment + onsite.Discharge;
+
+      return {offsite, onsite, total: offsite.total + onsite.total};
+    },
+
+    compare_delta_abs_pct(b,f){
+      const B = Number(b||0), F = Number(f||0);
+      const diff = F - B;
+      const pct = (B!==0) ? (100*diff/B) : null;
+      return {diff, pct};
+    },
+
+    generate_compare_from_uploads(){
+      if(!this.compare_baseline_json || !this.compare_future_json){
+        this.compare_msg = "Please upload both Baseline and Future ECAM JSON.";
+        return;
+      }
+      try{
+        const B = this.extract_sfd_emissions_from_ecam_json(this.compare_baseline_json);
+        const F = this.extract_sfd_emissions_from_ecam_json(this.compare_future_json);
+        this.compare_B = B;
+        this.compare_F = F;
+
+        const rows = [];
+
+        const pushRow = (group, name, b, f)=>{
+          const d=this.compare_delta_abs_pct(b,f);
+          rows.push({group, name, b, f, diff:d.diff, pct:d.pct});
+        };
+
+        pushRow("OFFSITE SANITATION","Collection", B.offsite.Collection, F.offsite.Collection);
+        pushRow("OFFSITE SANITATION","Transport",  B.offsite.Transport,  F.offsite.Transport);
+        pushRow("OFFSITE SANITATION","Treatment",  B.offsite.Treatment,  F.offsite.Treatment);
+        pushRow("OFFSITE SANITATION","Total offsite",B.offsite.total,    F.offsite.total);
+
+        pushRow("ONSITE SANITATION","Containment", B.onsite.Containment, F.onsite.Containment);
+        pushRow("ONSITE SANITATION","Emptying",    B.onsite.Emptying,    F.onsite.Emptying);
+        pushRow("ONSITE SANITATION","Treatment",   B.onsite.Treatment,   F.onsite.Treatment);
+        pushRow("ONSITE SANITATION","Discharge",   B.onsite.Discharge,   F.onsite.Discharge);
+        pushRow("ONSITE SANITATION","Total onsite",B.onsite.total,       F.onsite.total);
+
+        pushRow("TOTAL","Total (offsite+onsite)",  B.total,              F.total);
+
+        this.compare_rows = rows;
+        this.compare_msg = "Comparison generated.";
+
+        this.$nextTick(()=>{ try{ this.draw_compare_pies(B,F); }catch(e){} });
       }catch(e){
         console.warn(e);
-        this.compare_error = "Comparison failed (could not parse emissions from the provided JSON files).";
-        this.compare_result_ready = false;
+        this.compare_msg = "Could not generate comparison.";
+      }
+    },
+
+    draw_compare_pies(B, F){
+      try{
+        if(!(window && window.draw_pie_chart)) return;
+
+        const ids = ["chart_compare_baseline_offsite","chart_compare_baseline_onsite","chart_compare_future_offsite","chart_compare_future_onsite"];
+        ids.forEach(id=>{
+          const el = document.getElementById(id);
+          if(el) el.innerHTML = "";
+        });
+
+        // Baseline
+        window.draw_pie_chart("chart_compare_baseline_offsite", [
+          {label:"Collection", value:B.offsite.Collection},
+          {label:"Transport",  value:B.offsite.Transport},
+          {label:"Treatment",  value:B.offsite.Treatment},
+        ]);
+        window.draw_pie_chart("chart_compare_baseline_onsite", [
+          {label:"Containment", value:B.onsite.Containment},
+          {label:"Emptying",    value:B.onsite.Emptying},
+          {label:"Treatment",   value:B.onsite.Treatment},
+          {label:"Discharge",   value:B.onsite.Discharge},
+        ]);
+
+        // Future
+        window.draw_pie_chart("chart_compare_future_offsite", [
+          {label:"Collection", value:F.offsite.Collection},
+          {label:"Transport",  value:F.offsite.Transport},
+          {label:"Treatment",  value:F.offsite.Treatment},
+        ]);
+        window.draw_pie_chart("chart_compare_future_onsite", [
+          {label:"Containment", value:F.onsite.Containment},
+          {label:"Emptying",    value:F.onsite.Emptying},
+          {label:"Treatment",   value:F.onsite.Treatment},
+          {label:"Discharge",   value:F.onsite.Discharge},
+        ]);
+      }catch(e){
+        console.warn("compare pie charts failed", e);
       }
     },
 
@@ -1013,7 +932,7 @@ get_sfd_emissions(){
 
   watch:{
     current_view(newV){
-      this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); if(newV==='sfd_compare' && this.compare_result_ready){ const B=this._extract_emissions_from_ecam_json(this.compare_baseline_raw); const F=this._extract_emissions_from_ecam_json(this.compare_future_raw); this.draw_compare_pies(B,F);} }catch(e){} });
+      this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
     },
     sfd_assessment_key(){
       try{
@@ -1040,7 +959,7 @@ get_sfd_emissions(){
         <button @click="current_view='charts_nrg'" :selected="current_view=='charts_nrg'"  type="button">{{translate("Charts Energy")             }}</button>
         <button @click="current_view='charts_pop'" :selected="current_view=='charts_pop'"  type="button">{{translate("Charts Serviced population")}}</button>
         <button type="button" @click.prevent="current_view='sfd'" :selected="current_view=='sfd'" >SFD</button>
-        <button type="button" @click.prevent="current_view=\'sfd_compare\'" :selected="current_view==\'sfd_compare\'" >SFD Compare</button>
+        <button type="button" @click.prevent="current_view='sfd_compare'" :selected="current_view=='sfd_compare'" >SFD Compare</button>
         <hr style="border-color:#eee">
         <div>
           <tutorial_tip
@@ -1578,21 +1497,22 @@ get_sfd_emissions(){
         </div>
         <!--SFD-->
         <div v-if="current_view=='sfd'">
-                    <div style=\"margin:1em 0; padding:1em; border:1px solid #ccc;\">
-            <div style=\"display:flex;gap:.75em;align-items:center;justify-content:space-between;flex-wrap:wrap;\">
+                    
+          <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
+            <div style="display:flex;gap:.75em;align-items:center;justify-content:space-between;flex-wrap:wrap;">
               <div>
                 <b>Upload SFD graphic</b><br>
-                <input type=\"file\" accept=\"image/png,image/jpeg\" @change=\"on_sfd_file_change\">
-                <button type=\"button\" v-if=\"sfd_image_dataurl\" @click.prevent=\"clear_sfd_image()\" style=\"margin-left:.5em;\">Remove</button>
+                <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
+                <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
-              <div style=\"display:flex;gap:.5em;align-items:center;flex-wrap:wrap;justify-content:flex-end;\">
-                <button type=\"button\" @click.prevent=\"download_sfd_jpg()\" :disabled=\"!sfd_image_dataurl\">Download JPG</button>
+              <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+                <button type="button" @click.prevent="download_sfd_jpg()" :disabled="!sfd_image_dataurl">Download JPG</button>
               </div>
             </div>
           </div>
 
-          <div id=\"sfd_export_area\" style="display:flex; gap:1em; align-items:stretch; flex-wrap:wrap; width:100%;">
-            <div class="chart_container" style="flex:1 1 520px; min-width:320px;">
+<div id="sfd_export_area" style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start;">
+            <div class="chart_container">
               <div class="chart_title">Emissions summary</div>
 
               <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center; margin-top:1em;">
@@ -1623,10 +1543,12 @@ get_sfd_emissions(){
                 </div>
                 <div><div id="chart_sfd_onsite"></div></div>
               </div>
-              </div>
+
+              
+
             </div>
 
-            <div class="chart_container" style="flex:1 1 520px; min-width:320px;">
+            <div class="chart_container">
               <div class="chart_title">SFD graphic</div>
               <div style="margin-top:1em;">
                 <div v-if="sfd_image_dataurl">
@@ -1638,131 +1560,121 @@ get_sfd_emissions(){
               </div>
             </div>
           </div>
-
+        </div>
         <!--SFD Compare-->
         <div v-if="current_view=='sfd_compare'">
           <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
-            <div style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start;">
-              <div>
-                <div style="font-weight:700; color:var(--color-level-generic); margin-bottom:.5em;">Baseline scenario</div>
-                <div style="margin-bottom:.75em;">
+            <div style="display:flex;gap:1em;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;">
+              <div style="flex:1;min-width:280px;">
+                <div style="font-weight:700;color:var(--color-level-generic);margin-bottom:.5em;">Baseline scenario</div>
+                <div style="margin-bottom:.5em;">
                   <b>Upload ECAM JSON</b><br>
-                  <input type="file" accept="application/json,.json" @change="on_compare_baseline_json">
+                  <input type="file" accept=".json,application/json" @change="on_compare_baseline_json_change">
                 </div>
                 <div>
                   <b>Upload SFD graphic (optional)</b><br>
-                  <input type="file" accept="image/png,image/jpeg" @change="on_compare_baseline_sfd">
+                  <input type="file" accept="image/png,image/jpeg" @change="on_compare_baseline_sfd_change">
                 </div>
               </div>
 
-              <div>
-                <div style="font-weight:700; color:var(--color-level-generic); margin-bottom:.5em;">Future scenario (2040)</div>
-                <div style="margin-bottom:.75em;">
+              <div style="flex:1;min-width:280px;">
+                <div style="font-weight:700;color:var(--color-level-generic);margin-bottom:.5em;">Future scenario (2040)</div>
+                <div style="margin-bottom:.5em;">
                   <b>Upload ECAM JSON</b><br>
-                  <input type="file" accept="application/json,.json" @change="on_compare_future_json">
+                  <input type="file" accept=".json,application/json" @change="on_compare_future_json_change">
                 </div>
                 <div>
                   <b>Upload SFD graphic (optional)</b><br>
-                  <input type="file" accept="image/png,image/jpeg" @change="on_compare_future_sfd">
+                  <input type="file" accept="image/png,image/jpeg" @change="on_compare_future_sfd_change">
                 </div>
+              </div>
+
+              <div style="display:flex;gap:.5em;align-items:center;justify-content:flex-end;min-width:220px;">
+                <button type="button" @click.prevent="clear_compare_uploads()">Clear</button>
+                <button type="button" @click.prevent="generate_compare_from_uploads()" :disabled="!compare_baseline_json || !compare_future_json">Generate comparison</button>
               </div>
             </div>
 
-            <div style="margin-top:1em; display:flex; gap:.5em; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
-              <button type="button" @click.prevent="clear_compare_inputs()" :disabled="!compare_baseline_raw && !compare_future_raw && !compare_baseline_sfd && !compare_future_sfd">Clear</button>
-              <button type="button" @click.prevent="compute_compare()" :disabled="!compare_baseline_raw || !compare_future_raw">Generate comparison</button>
-            </div>
-
-            <div v-if="compare_error" style="margin-top:.75em; color:#b91c1c; font-weight:600;">
-              {{compare_error}}
-            </div>
+            <div v-if="compare_msg" style="margin-top:.75em;color:#666;font-size:.95em;">{{compare_msg}}</div>
           </div>
 
-          <div class="chart_container">
+          <div v-if="compare_rows" class="chart_container" style="border-top:1px solid #ccc;">
             <div class="chart_title">Comparison (Baseline vs Future 2040)</div>
 
-            <div v-if="!compare_result_ready" style="color:#888; padding:1em; border:1px dashed #ccc; margin-top:1em;">
-              Upload both ECAM JSON files and click “Generate comparison”.
-            </div>
+            <table class="legend" style="width:100%; margin-top:1em;">
+              <tr style="font-weight:700;">
+                <td>Component</td>
+                <td style="text-align:right;">Baseline</td>
+                <td style="text-align:right;">Future</td>
+                <td style="text-align:right;">Δ</td>
+                <td style="text-align:right;">Δ%</td>
+              </tr>
 
-            <div v-else style="margin-top:1em;">
-              <table class="legend" style="width:100%;">
-                <tr style="font-weight:700;">
-                  <td>Component</td>
-                  <td style="text-align:right;">Baseline</td>
-                  <td style="text-align:right;">Future</td>
-                  <td style="text-align:right;">Δ</td>
-                  <td style="text-align:right;">Δ%</td>
+              <template v-for="(row, idx) in compare_rows">
+                <tr v-if="idx==0 || compare_rows[idx-1].group!=row.group">
+                  <td colspan="5" style="padding-top:1.2em; font-weight:700;">{{row.group}}</td>
                 </tr>
+                <tr>
+                  <td style="padding-left:.75em;">{{row.name}}</td>
+                  <td style="text-align:right;">{{format_emission(row.b)}} ({{current_unit_ghg}})</td>
+                  <td style="text-align:right;">{{format_emission(row.f)}} ({{current_unit_ghg}})</td>
+                  <td style="text-align:right;">{{format_emission(row.diff)}} ({{current_unit_ghg}})</td>
+                  <td style="text-align:right;">{{ row.pct===null ? "-" : format(row.pct,1,1) + "%" }}</td>
+                </tr>
+              </template>
+            </table>
 
-                <tr style="font-weight:700;"><td colspan="5" style="padding-top:.6em;">OFFSITE SANITATION</td></tr>
-                <tr v-for="row in compare_rows_offsite">
-                  <td>{{row.label}}</td>
-                  <td style="text-align:right;">{{format_emission(row.baseline)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right;">{{format_emission(row.future)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right;">{{format_emission(row.diff)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right;">{{ row.pct===null ? '-' : format(row.pct,1,1)+'%' }}</td>
-                </tr>
-
-                <tr style="font-weight:700;"><td colspan="5" style="padding-top:.9em;">ONSITE SANITATION</td></tr>
-                <tr v-for="row in compare_rows_onsite">
-                  <td>{{row.label}}</td>
-                  <td style="text-align:right;">{{format_emission(row.baseline)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right;">{{format_emission(row.future)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right;">{{format_emission(row.diff)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right;">{{ row.pct===null ? '-' : format(row.pct,1,1)+'%' }}</td>
-                </tr>
-
-                <tr style="font-weight:700;">
-                  <td style="padding-top:.9em;">TOTAL (offsite+onsite)</td>
-                  <td style="text-align:right; padding-top:.9em;">{{format_emission(compare_total.baseline)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right; padding-top:.9em;">{{format_emission(compare_total.future)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right; padding-top:.9em;">{{format_emission(compare_total.diff)}} <span class="unit" v-html="current_unit_ghg.prettify()"></span></td>
-                  <td style="text-align:right; padding-top:.9em;">{{ compare_total.pct===null ? '-' : format(compare_total.pct,1,1)+'%' }}</td>
-                </tr>
-              </table>
-              <div style="margin-top:1em; display:grid; grid-template-columns:50% 50%; gap:1em;">
-                <div class="chart_container" style="border:1px solid #eee;">
-                  <div class="chart_title">Baseline pie charts</div>
-                  <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1em;">
-                    <div><div style="font-weight:600; margin-bottom:.25em;">Offsite</div><div id="chart_compare_baseline_offsite"></div></div>
-                    <div><div style="font-weight:600; margin-bottom:.25em;">Onsite</div><div id="chart_compare_baseline_onsite"></div></div>
+            <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.5em;">
+              <div style="border:1px solid #eee; padding:1em;">
+                <div style="font-weight:700;margin-bottom:.5em;">Baseline pie charts</div>
+                <div style="display:grid;grid-template-columns:50% 50%;gap:1em;">
+                  <div>
+                    <div style="font-weight:700;font-size:.9em;margin-bottom:.25em;">Offsite</div>
+                    <div id="chart_compare_baseline_offsite"></div>
                   </div>
-                </div>
-                <div class="chart_container" style="border:1px solid #eee;">
-                  <div class="chart_title">Future pie charts</div>
-                  <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1em;">
-                    <div><div style="font-weight:600; margin-bottom:.25em;">Offsite</div><div id="chart_compare_future_offsite"></div></div>
-                    <div><div style="font-weight:600; margin-bottom:.25em;">Onsite</div><div id="chart_compare_future_onsite"></div></div>
+                  <div>
+                    <div style="font-weight:700;font-size:.9em;margin-bottom:.25em;">Onsite</div>
+                    <div id="chart_compare_baseline_onsite"></div>
                   </div>
                 </div>
               </div>
 
-
-              <div style="margin-top:1em; display:grid; grid-template-columns:50% 50%; gap:1em;" v-if="compare_baseline_sfd || compare_future_sfd">
-                <div class="chart_container" style="border:1px solid #eee;">
-                  <div class="chart_title">Baseline SFD</div>
-                  <div style="margin-top:1em;">
-                    <img v-if="compare_baseline_sfd" :src="compare_baseline_sfd" style="max-width:100%; height:auto; display:block; margin:0 auto; border:1px solid #ddd;">
-                    <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No baseline SFD uploaded.</div>
+              <div style="border:1px solid #eee; padding:1em;">
+                <div style="font-weight:700;margin-bottom:.5em;">Future pie charts</div>
+                <div style="display:grid;grid-template-columns:50% 50%;gap:1em;">
+                  <div>
+                    <div style="font-weight:700;font-size:.9em;margin-bottom:.25em;">Offsite</div>
+                    <div id="chart_compare_future_offsite"></div>
+                  </div>
+                  <div>
+                    <div style="font-weight:700;font-size:.9em;margin-bottom:.25em;">Onsite</div>
+                    <div id="chart_compare_future_onsite"></div>
                   </div>
                 </div>
-                <div class="chart_container" style="border:1px solid #eee;">
-                  <div class="chart_title">Future SFD</div>
-                  <div style="margin-top:1em;">
-                    <img v-if="compare_future_sfd" :src="compare_future_sfd" style="max-width:100%; height:auto; display:block; margin:0 auto; border:1px solid #ddd;">
-                    <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No future SFD uploaded.</div>
-                  </div>
-                </div>
-              </div>
-
-              <div style="margin-top:.75em; color:#777; font-size:.9em;">
-                Tip: export one JSON from ECAM for Baseline, switch scenario, export another JSON for Future, then upload both here.
               </div>
             </div>
+
+            <div v-if="compare_baseline_sfd || compare_future_sfd" style="margin-top:1.5em; display:grid; grid-template-columns:50% 50%; gap:1em;">
+              <div class="chart_container" style="border-top:none;">
+                <div class="chart_title">Baseline SFD</div>
+                <div style="margin-top:1em;">
+                  <img v-if="compare_baseline_sfd" :src="compare_baseline_sfd" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #ddd;">
+                  <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No baseline SFD uploaded.</div>
+                </div>
+              </div>
+              <div class="chart_container" style="border-top:none;">
+                <div class="chart_title">Future SFD</div>
+                <div style="margin-top:1em;">
+                  <img v-if="compare_future_sfd" :src="compare_future_sfd" style="max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid #ddd;">
+                  <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No future SFD uploaded.</div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
-        </div>
+
+
 
       </div>
     </div>
@@ -1772,7 +1684,8 @@ get_sfd_emissions(){
     let _this=this;
     this.$nextTick(()=>{
       try{
-        
+        _this.sync_globals();
+
         _this.draw_all_charts();
         try{ _this.draw_sfd_charts(); }catch(e){}
       }catch(e){
