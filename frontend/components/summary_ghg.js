@@ -15,9 +15,6 @@ let summary_ghg=new Vue({
 
     // --- SFD tab (UI only) ---
     sfd_image_dataurl:null,
-    // keep it defined (it is referenced in template)
-    // user wants always BOTH -> keep as 'both'
-    sfd_view_mode:"both",
 
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
@@ -30,7 +27,7 @@ let summary_ghg=new Vue({
     variable,
     Charts,
 
-    //backend (these must be kept in sync after JSON import)
+    //backend
     Global,
     Structure,
     Languages,
@@ -43,31 +40,6 @@ let summary_ghg=new Vue({
     format,
     go_to,
     get_sum_of_substages,
-
-    // keep Vue refs in sync with window.* after importing ECAM JSON
-    sync_globals(){
-      try{
-        if(typeof window!=="undefined"){
-          if(window.Global) this.Global = window.Global;
-          if(window.Structure) this.Structure = window.Structure;
-          if(window.Languages) this.Languages = window.Languages;
-          if(window.IPCC_categories) this.IPCC_categories = window.IPCC_categories;
-          if(window.Formulas) this.Formulas = window.Formulas;
-          if(window.variable) this.variable = window.variable;
-          if(window.Charts) this.Charts = window.Charts;
-        }else{
-          if(typeof Global!=="undefined" && Global) this.Global = Global;
-          if(typeof Structure!=="undefined" && Structure) this.Structure = Structure;
-          if(typeof Languages!=="undefined" && Languages) this.Languages = Languages;
-          if(typeof IPCC_categories!=="undefined" && IPCC_categories) this.IPCC_categories = IPCC_categories;
-          if(typeof Formulas!=="undefined" && Formulas) this.Formulas = Formulas;
-          if(typeof variable!=="undefined" && variable) this.variable = variable;
-          if(typeof Charts!=="undefined" && Charts) this.Charts = Charts;
-        }
-      }catch(e){
-        console.warn("sync_globals failed:", e);
-      }
-    },
 
     //sorting function for emission sources order requested by elaine
     emission_sources_order(a,b){
@@ -142,7 +114,7 @@ let summary_ghg=new Vue({
     // ---------------------------
 
     on_sfd_file_change(ev){
-      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      const file = ev && ev.target && ev.target.files ? ev.target && ev.target.files ? ev.target.files[0] : null : null;
       if(!file) return;
 
       const ok = /image\/(png|jpeg)/i.test(file.type);
@@ -167,23 +139,23 @@ let summary_ghg=new Vue({
       if(b) b.innerHTML="";
     },
 
+    // Export SFD + results (UI only) as single JPG (EXACTLY as shown on screen)
+    // We capture the DOM of #sfd_export_area so the JPG matches ECAM layout (numbers, alignment, fonts).
+
     ensure_html2canvas(){
       return new Promise((resolve,reject)=>{
         try{
           if(typeof window !== "undefined" && window.html2canvas){
-            resolve();
-            return;
+            resolve(); return;
           }
-          // load once
+          // avoid double-loading
           if(document.getElementById("html2canvas_loader")){
             const t0 = Date.now();
             const wait = setInterval(()=>{
               if(window.html2canvas){
-                clearInterval(wait);
-                resolve();
+                clearInterval(wait); resolve();
               }else if(Date.now()-t0>8000){
-                clearInterval(wait);
-                reject(new Error("html2canvas load timeout"));
+                clearInterval(wait); reject(new Error("html2canvas load timeout"));
               }
             }, 100);
             return;
@@ -199,8 +171,7 @@ let summary_ghg=new Vue({
       });
     },
 
-    // Export EXACTLY like ECAM screen (DOM capture) as JPG
-    download_sfd_jpg: async function(){
+    async download_sfd_jpg(){
       try{
         if(!this.sfd_image_dataurl){
           alert("Please upload an SFD image first.");
@@ -215,6 +186,7 @@ let summary_ghg=new Vue({
           return;
         }
 
+        // Capture exactly what is rendered
         const canvas = await window.html2canvas(el, {
           backgroundColor: "#ffffff",
           scale: 2,
@@ -245,17 +217,17 @@ let summary_ghg=new Vue({
         console.error(err);
         alert("Could not export JPG.");
       }
-    },
+    }
+,
 
-    get_sfd_emissions(){
+get_sfd_emissions(){
       const zeros = {
         offsite:{ Collection:0, Transport:0, Treatment:0, total:0 },
         onsite :{ Containment:0, Emptying:0, Treatment:0, Discharge:0, total:0 },
       };
 
       try{
-        if(!this.Global || !this.Global.Waste) return zeros;
-        const Global = this.Global;
+        if(!Global || !Global.Waste) return zeros;
 
         // OFFSITE SANITATION
         const off_collection = (Global.Waste.Collection||[]).map(s =>
@@ -322,9 +294,6 @@ let summary_ghg=new Vue({
       const e = this.get_sfd_emissions();
       const pct = (v, tot) => tot>0 ? (100*v/tot) : 0;
 
-      const Charts = this.Charts || window.Charts;
-      if(!Charts || !Charts.draw_pie_chart) return;
-
       Charts.draw_pie_chart(
         "chart_sfd_offsite",
         [
@@ -347,71 +316,67 @@ let summary_ghg=new Vue({
       );
     },
 
+
     //call chart drawing functions
     draw_all_charts(){
+      //destroy all charts
       Object.values(this.charts).forEach(chart=>chart.destroy());
 
-      const Global = this.Global;
-      const Structure = this.Structure;
-      const Charts = this.Charts;
-      const IPCC_categories = this.IPCC_categories;
+      //pie charts
+        Charts.draw_pie_chart('chart_1',
+          [
+            {"label":"", "value":100*Global.Water.ws_KPI_GHG().total/Global.TotalGHG().total},
+            {"label":"", "value":100*Global.Waste.ww_KPI_GHG().total/Global.TotalGHG().total},
+          ],[
+            "var(--color-level-Water)",
+            "var(--color-level-Waste)",
+          ]
+        );
 
-      if(!Global || !Structure || !Charts) return;
+        Charts.draw_pie_chart('chart_2',
+          Structure.filter(s=>s.sublevel).map(s=>{
+            let label = "";
+            let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_KPI_GHG']().total).sum()/Global.TotalGHG().total;
+            return {label,value};
+          }),
+          Structure.filter(s=>s.sublevel).map(s=>s.color),
+        );
 
-      Charts.draw_pie_chart('chart_1',
-        [
-          {"label":"", "value":100*Global.Water.ws_KPI_GHG().total/Global.TotalGHG().total},
-          {"label":"", "value":100*Global.Waste.ww_KPI_GHG().total/Global.TotalGHG().total},
-        ],[
-          "var(--color-level-Water)",
-          "var(--color-level-Waste)",
-        ]
-      );
+        //d3js pie chart -- ghg by gas
+        Charts.draw_pie_chart('chart_3',
+          [
+            {"label":"", "value":100*Global.TotalGHG().co2/Global.TotalGHG().total},
+            {"label":"", "value":100*Global.TotalGHG().n2o/Global.TotalGHG().total},
+            {"label":"", "value":100*Global.TotalGHG().ch4/Global.TotalGHG().total},
+          ],
+          [
+            Charts.gas_colors.co2,
+            Charts.gas_colors.n2o,
+            Charts.gas_colors.ch4,
+          ],
+        );
 
-      Charts.draw_pie_chart('chart_2',
-        Structure.filter(s=>s.sublevel).map(s=>{
-          let label = "";
-          let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_KPI_GHG']().total).sum()/Global.TotalGHG().total;
-          return {label,value};
-        }),
-        Structure.filter(s=>s.sublevel).map(s=>s.color),
-      );
+        Charts.draw_pie_chart('chart_nrg_levels',
+          [
+            {"label":"", "value":100*Global.Water.ws_nrg_cons()/Global.TotalNRG()},
+            {"label":"", "value":100*Global.Waste.ww_nrg_cons()/Global.TotalNRG()},
+          ],
+          [
+            "var(--color-level-Water)",
+            "var(--color-level-Waste)",
+          ],
+        );
 
-      Charts.draw_pie_chart('chart_3',
-        [
-          {"label":"", "value":100*Global.TotalGHG().co2/Global.TotalGHG().total},
-          {"label":"", "value":100*Global.TotalGHG().n2o/Global.TotalGHG().total},
-          {"label":"", "value":100*Global.TotalGHG().ch4/Global.TotalGHG().total},
-        ],
-        [
-          Charts.gas_colors.co2,
-          Charts.gas_colors.n2o,
-          Charts.gas_colors.ch4,
-        ],
-      );
+        Charts.draw_pie_chart('chart_nrg_stages',
+          Structure.filter(s=>s.sublevel).map(s=>{
+            let total_nrg = Global.TotalNRG();
+            let label = "";
+            let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_nrg_cons']).sum()/total_nrg;
+            return {label,value};
+          }),
+          Structure.filter(s=>s.sublevel).map(s=>s.color),
+        );
 
-      Charts.draw_pie_chart('chart_nrg_levels',
-        [
-          {"label":"", "value":100*Global.Water.ws_nrg_cons()/Global.TotalNRG()},
-          {"label":"", "value":100*Global.Waste.ww_nrg_cons()/Global.TotalNRG()},
-        ],
-        [
-          "var(--color-level-Water)",
-          "var(--color-level-Waste)",
-        ],
-      );
-
-      Charts.draw_pie_chart('chart_nrg_stages',
-        Structure.filter(s=>s.sublevel).map(s=>{
-          let total_nrg = Global.TotalNRG();
-          let label = "";
-          let value = 100*Global[s.level][s.sublevel].map(ss=>ss[s.prefix+'_nrg_cons']).sum()/total_nrg;
-          return {label,value};
-        }),
-        Structure.filter(s=>s.sublevel).map(s=>s.color),
-      );
-
-      if(IPCC_categories){
         Charts.draw_pie_chart('chart_ipcc_categories',
           Object.keys(IPCC_categories).map(key=>{
             let total_ghg = Global.TotalGHG().total;
@@ -421,30 +386,31 @@ let summary_ghg=new Vue({
           }),
           Object.values(IPCC_categories).map(obj=>obj.color),
         );
-      }
 
-      Charts.draw_pie_chart('pie_chart_ws_serv_pop',
-        [
-          {label:translate('ws_serv_pop_descr'), value:    100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
-          {label:translate('ws_serv_pop_descr'), value:100-100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
-        ],
-        colors=[
-          "var(--color-level-Water)",
-          "#eee",
-        ],
-      );
+        Charts.draw_pie_chart('pie_chart_ws_serv_pop',
+          [
+            {label:translate('ws_serv_pop_descr'), value:    100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
+            {label:translate('ws_serv_pop_descr'), value:100-100*Global.Water.ws_serv_pop()/Global.Water.ws_resi_pop||0},
+          ],
+          colors=[
+            "var(--color-level-Water)",
+            "#eee",
+          ],
+        );
 
-      Charts.draw_pie_chart('pie_chart_ww_serv_pop',
-        [
-          {label:translate('ww_serv_pop_descr'), value:    100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
-          {label:translate('ww_serv_pop_descr'), value:100-100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
-        ],
-        colors=[
-          "var(--color-level-Waste)",
-          "#eee",
-        ],
-      );
+        Charts.draw_pie_chart('pie_chart_ww_serv_pop',
+          [
+            {label:translate('ww_serv_pop_descr'), value:    100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
+            {label:translate('ww_serv_pop_descr'), value:100-100*Global.Waste.ww_serv_pop()/Global.Waste.ww_resi_pop||0},
+          ],
+          colors=[
+            "var(--color-level-Waste)",
+            "#eee",
+          ],
+        );
+      //--
 
+      //Chart.js bar chart -- ghg by substage
       if(document.getElementById('bar_chart_ghg_substages')){
         this.charts.bar_chart_ghg_substages = new Chart('bar_chart_ghg_substages',{
           type:'bar',
@@ -474,13 +440,20 @@ let summary_ghg=new Vue({
           options:{
             aspectRatio:4,
             scales:{
-              x:{ stacked:true },
-              y:{ beginAtZero:true, borderWidth:2, stacked:true },
+              x:{
+                stacked:true,
+              },
+              y:{
+                beginAtZero:true,
+                borderWidth:2,
+                stacked:true,
+              },
             },
           },
         });
       }
 
+      //Chart.js bar chart -- nrg by substage
       if(document.getElementById('bar_chart_nrg_substages')){
         this.charts.bar_chart_nrg_substages = new Chart('bar_chart_nrg_substages',{
           type:'bar',
@@ -508,7 +481,10 @@ let summary_ghg=new Vue({
           options:{
             aspectRatio:4,
             scales:{
-              y:{ beginAtZero:true, borderWidth:2 },
+              y:{
+                beginAtZero:true,
+                borderWidth:2,
+              },
             },
           },
         });
@@ -518,18 +494,23 @@ let summary_ghg=new Vue({
 
   watch:{
     current_view(newV){
+      if(newV==='sfd'){
+        this.clear_sfd_image();
+      }
       this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
     }
   },
 
   template:`
-    <div id=summary_ghg v-if="visible && Languages.ready && Global && Structure && Formulas">
+    <div id=summary_ghg v-if="visible && Languages.ready">
       <div> {{show_summaries_menu()}} </div>
 
+      <!--title-->
       <h1 style="padding-left:0">
         {{translate("Summary: GHG emissions and energy consumption")}}
       </h1>
 
+      <!--select tables or charts-->
       <div style="padding:1em;border:1px solid #ccc">
         <button @click="current_view='table'"      :selected="current_view=='table'"       type="button">{{translate("Table")                     }}</button>
         <button @click="current_view='charts_ghg'" :selected="current_view=='charts_ghg'"  type="button">{{translate("Charts GHG")                }}</button>
@@ -545,9 +526,20 @@ let summary_ghg=new Vue({
           ></tutorial_tip>
         </div>
 
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <table style="border:1px solid #eee;">
+        <div
+          style="
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+          "
+        >
+          <table
+            style="
+              border:1px solid #eee;
+            "
+          >
             <tr v-if="current_view=='table'">
+              <!--select summary table type-->
               <td><b>{{translate("Select summary table")}}</b></td>
               <td>
                 <label>
@@ -563,6 +555,7 @@ let summary_ghg=new Vue({
               </td>
             </tr>
             <tr v-if="['table','charts_ghg','charts_nrg'].indexOf(current_view)+1">
+              <!--select units-->
               <td><b>{{translate("Select units")}}</b></td>
               <td v-if="current_view=='table'||current_view=='charts_ghg'">
                 <select v-model="current_unit_ghg">
@@ -580,6 +573,7 @@ let summary_ghg=new Vue({
           </table>
 
           <div v-if="current_view=='table' && type_of_summary_table=='ghg'">
+            <!--select see other ghgs-->
             <b v-html="translate('Show emissions in CO2, CH4 and N2O').prettify()"></b></td>
             <span>
               <label>
@@ -604,27 +598,481 @@ let summary_ghg=new Vue({
         </div>
       </div>
 
+      <!--content-->
       <div>
-        <!-- (rest of ECAM summary/charts unchanged from your base; kept to preserve behavior) -->
+        <!--table container-->
+        <div v-if="current_view=='table'">
+          <!--summary table 2.0-->
+          <div style="margin-top:20px"></div>
 
-        <!--SFD-->
-        <div v-if="current_view=='sfd'">
-          <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
-            <div style="display:flex;gap:.75em;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-bottom:.5em;">
-              <button type="button" @click.prevent="download_sfd_jpg()">Download JPG</button>
+          <!--actual table-->
+          <div>
+            <!--header-->
+            <div
+              style="
+                display:grid;
+                grid-template-columns: 15% ${85*0.15}% ${85*0.85*0.15}% ${85*0.85*0.85*0.28}% ${85*0.85*0.85*0.18}% ${85*0.85*0.85*0.18}% ${85*0.85*0.85*0.18}% ${85*0.85*0.85*0.18}%;
+                text-align:center;
+              "
+            >
+              <div>{{translate("Total")}}  (<span class=unit v-html="get_summary_unit().prettify()"></span>)</div>
+              <div>{{translate("System")}} (<span class=unit v-html="get_summary_unit().prettify()"></span>)</div>
+              <div>{{translate("Stage")}}  (<span class=unit v-html="get_summary_unit().prettify()"></span>)</div>
+              <div v-if="type_of_summary_table=='ghg'" style="text-align:left">
+                {{translate("Emission source")}}
+              </div>
+              <div v-if="type_of_summary_table=='nrg'">
+                {{translate("Substages")}}
+                (<span class=unit v-html="current_unit_nrg.prettify()"></span>)
+              </div>
+              <div>
+                <span v-if="type_of_summary_table=='ghg'">{{translate("Emission")}}</span>
+                <span v-if="type_of_summary_table=='nrg'">{{translate("Energy consumption")}}</span>
+                (<span class=unit v-html="get_summary_unit().prettify()"></span>)
+              </div>
+
+              <div v-if="type_of_summary_table=='ghg' && see_emissions_disgregated">${'CO2'.prettify()} (<span class=unit v-html="current_unit_ghg.prettify()"></span>)</div>
+              <div v-if="type_of_summary_table=='ghg' && see_emissions_disgregated">${'CH4'.prettify()} (<span class=unit v-html="current_unit_ghg.prettify()"></span>)</div>
+              <div v-if="type_of_summary_table=='ghg' && see_emissions_disgregated">${'N2O'.prettify()} (<span class=unit v-html="current_unit_ghg.prettify()"></span>)</div>
             </div>
 
+            <!--body-->
+            <div
+              class=subdivision
+              style="background:var(--color-level-generic)"
+            >
+              <div
+                style="
+                  color:white;
+                  text-align:center;
+                  font-size:large;
+                "
+              >
+                <div v-if="type_of_summary_table=='ghg'">
+                  <img src="frontend/img/viti/select_scenario/icon-co2-white.svg" style="width:80px">
+                </div>
+                <div v-if="type_of_summary_table=='nrg'">
+                  <img src="frontend/img/viti/select_scenario/icon-energy-white.svg" style="width:80px">
+                </div>
+
+                <div>
+                  <div v-if="type_of_summary_table=='ghg'">
+                    {{translate('TotalGHG_descr')}}
+                  </div>
+                  <div v-if="type_of_summary_table=='nrg'">
+                    {{translate("Total energy consumption")}}
+                  </div>
+                </div>
+
+                <div v-if="type_of_summary_table=='ghg'">
+                  <b>{{format_emission(Global.TotalGHG().total)}}</b>
+                </div>
+                <div v-if="type_of_summary_table=='nrg'">
+                  <b>{{format_energy(Global.TotalNRG())}}</b>
+                </div>
+              </div>
+              <div>
+                <div
+                  v-for="s in Structure.filter(s=>!s.sublevel)"
+                  class=subdivision
+                  :style="{background:s.color}"
+                >
+                  <div>
+                    <div
+                      style="
+                        padding:0 0.5em;
+                        text-align:center;
+                        font-size:large;
+                        color:white;
+                      "
+                    >
+                      <div>
+                        <img :src="'frontend/img/stages_menu-'+s.prefix+'.svg'" style="width:40px">
+                      </div>
+                      <div>
+                        {{translate(s.level)}}
+                      </div>
+                      <div v-if="type_of_summary_table=='ghg'">
+                        <b>{{format_emission(Global[s.level][s.prefix+'_KPI_GHG']().total)}}</b>
+                      </div>
+                      <div v-if="type_of_summary_table=='nrg'">
+                        <b>{{format_energy(Global[s.level][s.prefix+'_nrg_cons']())}}</b>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div
+                      v-for="ss in Structure.filter(ss=>ss.sublevel && ss.level==s.level)"
+                      v-if="Global[ss.level][ss.sublevel].length"
+                      class="subdivision"
+                      :style="{
+                        background:'var(--color-level-'+ss.level+'-secondary)',
+                        color:'var(--color-level-'+ss.level+')',
+                        fontSize:'larger',
+                        borderBottom:'1px solid '+ss.color,
+                      }"
+                    >
+                      <div style="padding:1em;text-align:center">
+                        <div>
+                          <img :src="'frontend/img/'+ss.icon" style="width:40px">
+                        </div>
+                        <div>
+                          {{translate(ss.sublevel)}}
+                        </div>
+                        <div v-if="type_of_summary_table=='ghg'">
+                          <b>{{format_emission(Global[ss.level][ss.sublevel].map(subs=>subs[ss.prefix+'_KPI_GHG']().total).sum())}}</b>
+                        </div>
+                        <div v-if="type_of_summary_table=='nrg'">
+                          <b>{{format_energy(Global[ss.level][ss.sublevel].map(subs=>subs[ss.prefix+'_nrg_cons']).sum())}}</b>
+                        </div>
+                      </div>
+
+                      <div v-if="type_of_summary_table=='ghg'">
+                        <div
+                          v-for="key in
+                            Formulas.ids_per_formula(
+                              Global[ss.level][ss.sublevel][0][ss.prefix+'_KPI_GHG']
+                            ).sort(emission_sources_order)
+                          "
+                          style="
+                            display:grid;
+                            grid-template-columns:28% 18% 18% 18% 18%;
+                            align-items:center;
+                            padding:5px 0;
+                          "
+                          v-if="!hide_zero_valued_variables || Global[ss.level][ss.sublevel].map(ss=>ss[key]().total).sum()"
+                        >
+                          <div>
+                            <span v-html="translate(key+'_descr').prettify()"></span>
+                          </div>
+                          <div
+                            v-for="gas in ['total','co2','ch4','n2o']"
+                            v-if="gas=='total' || see_emissions_disgregated"
+                            :style="{
+                              textAlign:'center',
+                              fontWeight:gas=='total'?'bold':'',
+                            }"
+                          >
+                            {{
+                              format_emission(
+                                Global[ss.level][ss.sublevel].map(ss=>ss[key]()[gas]).sum()
+                              )
+                            }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div v-if="type_of_summary_table=='nrg'">
+                        <div
+                          v-for="substage in Global[ss.level][ss.sublevel]"
+                          style="
+                            align-items:center;
+                            padding:5px 0;
+                            display:grid;
+                            grid-template-columns:28% 18% 18% 18% 18%;
+                            text-align:center;
+                          "
+                        >
+                          <div>
+                            <span v-html="substage.name.prettify()"></span>
+                          </div>
+                          <div style="font-weight:bold">
+                            {{
+                              format_energy(
+                                substage[ss.prefix+'_nrg_cons']
+                              )
+                            }}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!--charts ghg-->
+        <div v-if="current_view=='charts_ghg'">
+          <!--pie charts ghg-->
+          <div
+            style="
+              display:grid;
+              grid-template-columns:50% 50%;
+            "
+          >
+            <div class=chart_container style="border-right:none">
+              <div class=chart_title>
+                <img src="frontend/img/viti/select_scenario/icon-co2.svg" class=icon_co2>
+                <span>{{translate("GHG emissions")}}</span>
+              </div>
+              <div class=flex>
+                <div>
+                  <table class=legend>
+                    <tr>
+                      <td style="background:var(--color-level-Water)"></td>
+                      <td>{{translate('Water')}}</td>
+                      <td>{{format_emission(Global.Water.ws_KPI_GHG().total)}}</td>
+                      <td class=unit v-html="current_unit_ghg.prettify()"></td>
+                    </tr>
+                    <tr>
+                      <td style="background:var(--color-level-Waste)"></td>
+                      <td>{{translate('Waste')}}</td>
+                      <td>{{format_emission(Global.Waste.ww_KPI_GHG().total)}}</td>
+                      <td class=unit v-html="current_unit_ghg.prettify()"></td>
+                    </tr>
+                  </table>
+                </div>
+                <div>
+                  <div id=chart_1></div>
+                </div>
+              </div>
+            </div>
+
+            <div class=chart_container>
+              <div class=chart_title>
+                <img src="frontend/img/viti/select_scenario/icon-co2.svg" class=icon_co2>
+                {{translate("GHG emissions by stage")}}
+              </div>
+              <div class=flex>
+                <div>
+                  <table class=legend>
+                    <tr
+                      v-for="stage in Structure.filter(s=>s.sublevel)"
+                      v-if="Global[stage.level][stage.sublevel].length"
+                    >
+                      <td :style="{background:stage.color}"></td>
+                      <td>
+                        {{translate(stage.sublevel)}}
+                      </td>
+                      <td>
+                        {{ format_emission(Global[stage.level][stage.sublevel].map(s=>s[stage.prefix+'_KPI_GHG']().total).sum()) }}
+                      </td>
+                      <td class=unit v-html="current_unit_ghg.prettify()"></td>
+                    </tr>
+                  </table>
+                </div>
+                <div>
+                  <div id=chart_2></div>
+                </div>
+              </div>
+            </div>
+
+            <div class=chart_container style="border-right:none">
+              <div class=chart_title>
+                <img src="frontend/img/viti/select_scenario/icon-co2.svg" class=icon_co2>
+                {{translate("GHG emissions by gas emitted")}}
+              </div>
+              <div
+                class=flex
+              >
+                <div>
+                  <table class=legend>
+                    <tr v-for="value,key in Global.TotalGHG()" v-if="key!='total'">
+                      <td :style="{background:Charts.gas_colors[key]}"></td>
+                      <td>
+                        <div v-html="key.toUpperCase().prettify()"></div>
+                      </td>
+                      <td>
+                        <div v-html="format_emission(value)"></div>
+                      </td>
+                      <td class=unit v-html="current_unit_ghg.prettify()"></td>
+                    </tr>
+                  </table>
+                </div>
+                <div>
+                  <div id=chart_3></div>
+                </div>
+              </div>
+            </div>
+
+            <!--ipcc categories
+            <div class=chart_container style="border-right:none">
+              <div class=chart_title>
+                <img src="frontend/img/viti/select_scenario/icon-co2.svg" class=icon_co2>
+                GHG emissions by IPCC category
+              </div>
+              <div class=flex>
+                <table class=legend>
+                  <tr v-for="[key,obj] in Object.entries(IPCC_categories)" :title="key">
+                    <td :style="{background:obj.color}"></td>
+                    <td>
+                      {{obj.description}}
+                    </td>
+                    <td>
+                      <div v-html="format_emission(obj.emissions(Global))"></div>
+                    </td>
+                    <td class=unit v-html="current_unit_ghg.prettify()"></td>
+                  </tr>
+                </table>
+                <div id=chart_ipcc_categories></div>
+              </div>
+            </div>
+            -->
+            <div class=chart_container></div>
+          </div>
+
+          <!--bar chart ghg substages-->
+          <div class="chart_container bar">
+            <div class=chart_title style="justify-content:center">
+              <img src="frontend/img/viti/select_scenario/icon-co2.svg" class=icon_co2>
+              {{translate("GHG emissions by substage")}}
+            </div>
+            <div>
+              <canvas id="bar_chart_ghg_substages" width="400" height="400"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!--charts nrg-->
+        <div v-if="current_view=='charts_nrg'">
+          <!--pie charts nrg-->
+          <div
+            style="
+              display:grid;
+              grid-template-columns:50% 50%;
+            "
+          >
+            <div class=chart_container style="border-right:none">
+              <div class=chart_title>
+                <img src="frontend/img/viti/select_scenario/icon-energy.svg" class=icon_nrg>
+                {{translate("Energy consumption")}}
+              </div>
+
+              <div class=flex>
+                <div>
+                  <table class=legend>
+                    <tr>
+                      <td style="background:var(--color-level-Water)"></td>
+                      <td>{{translate('Water')}}</td>
+                      <td>{{format_energy(Global.Water.ws_nrg_cons())}}</td>
+                      <td class=unit v-html="current_unit_nrg"></td>
+                    </tr>
+                    <tr>
+                      <td style="background:var(--color-level-Waste)"></td>
+                      <td>{{translate('Waste')}}</td>
+                      <td>{{format_energy(Global.Waste.ww_nrg_cons())}}</td>
+                      <td class=unit v-html="current_unit_nrg"></td>
+                    </tr>
+                  </table>
+                </div>
+                <div>
+                  <div id=chart_nrg_levels></div>
+                </div>
+              </div>
+            </div>
+
+            <div class=chart_container>
+              <div class=chart_title>
+                <img src="frontend/img/viti/select_scenario/icon-energy.svg" class=icon_nrg>
+                {{translate("Energy consumption by stage")}}
+              </div>
+
+              <div class=flex>
+                <div>
+                  <table class=legend>
+                    <tr v-for="stage in Structure.filter(s=>s.sublevel)">
+                      <td :style="{background:stage.color}">
+                      </td>
+                      <td>
+                        {{translate(stage.sublevel)}}
+                      </td>
+                      <td>
+                        {{ format_energy(Global[stage.level][stage.sublevel].map(s=>s[stage.prefix+'_nrg_cons']).sum()) }}
+                      </td>
+                      <td class=unit v-html="current_unit_nrg"></td>
+                    </tr>
+                  </table>
+                </div>
+                <div>
+                  <div id=chart_nrg_stages></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!--bar chart nrg substages-->
+          <div class="chart_container bar">
+            <div class=chart_title style="justify-content:center">
+              <img src="frontend/img/viti/select_scenario/icon-energy.svg" class=icon_nrg>
+              {{translate("Energy consumption by substage")}}
+            </div>
+            <div>
+              <canvas id="bar_chart_nrg_substages" width="400" height="400"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!--charts serviced population-->
+        <div v-if="current_view=='charts_pop'">
+          <div class="chart_container">
+            <div class=chart_title>
+              {{translate("Serviced population in water supply and wastewater sanitation stages")}}
+            </div>
+            <br><br>
+            <div style="
+              display:grid;
+              grid-template-columns:50% 50%;
+            ">
+              <div class=flex>
+                <table class=legend>
+                  <tr>
+                    <td :style="{background:'var(--color-level-Water)'}"></td>
+                    <td>{{translate('ws_serv_pop_descr')}}</td>
+                    <td>{{format(Global.Water.ws_serv_pop()) }}</td>
+                    <td class=unit v-html="translate('people')"></td>
+                  </tr>
+                  <tr>
+                    <td :style="{background:'#eee'}"></td>
+                    <td>{{translate('Non-serviced population')}}</td>
+                    <td>{{format(Global.Water.ws_resi_pop - Global.Water.ws_serv_pop())}}</td>
+                    <td class=unit v-html="translate('people')"></td>
+                  </tr>
+                </table>
+                <div id=pie_chart_ws_serv_pop></div>
+              </div>
+              <div class=flex>
+                <table class=legend>
+                  <tr>
+                    <td :style="{background:'var(--color-level-Waste)'}"></td>
+                    <td>{{translate('ww_serv_pop_descr')}}</td>
+                    <td>{{format(Global.Waste.ww_serv_pop()) }}</td>
+                    <td class=unit v-html="translate('people')"></td>
+                  </tr>
+                  <tr>
+                    <td :style="{background:'#eee'}"></td>
+                    <td>{{translate('Non-serviced population')}}</td>
+                    <td>{{format(Global.Waste.ww_resi_pop - Global.Waste.ww_serv_pop()) }}</td>
+                    <td class=unit v-html="translate('people')"></td>
+                  </tr>
+                </table>
+                <div id=pie_chart_ww_serv_pop></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!--SFD-->
+        <div v-if="current_view=='sfd'">
+                    <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
+            <div style="display:flex;gap:.75em;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-bottom:.5em;">
+              <label style="font-size:.9em;color:#555;">View:
+                
+              </label>
+              <button type="button" @click.prevent="download_sfd_jpg()">Download JPG</button>
+</div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
               <div>
                 <b>Upload SFD graphic</b><br>
                 <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
                 <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
-              <div style="color:#666; font-size:.9em;"></div>
+              <div style="color:#666; font-size:.9em;">
+                
+              </div>
             </div>
           </div>
 
-          <!-- IMPORTANT: this is what we export 1:1 to JPG -->
           <div id="sfd_export_area" style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start;">
             <div class="chart_container">
               <div class="chart_title">Emissions summary</div>
@@ -639,7 +1087,7 @@ let summary_ghg=new Vue({
                     <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().offsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
                   </table>
                 </div>
-                <div><div id="chart_sfd_offsite"></div></div>
+                <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_offsite"></div></div>
               </div>
 
               <hr style="border-color:#eee; margin:1.2em 0;">
@@ -655,7 +1103,11 @@ let summary_ghg=new Vue({
                     <tr><td><b>{{translate("Total")}}</b></td><td style="text-align:right;"><b>{{format_emission(get_sfd_emissions().onsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
                   </table>
                 </div>
-                <div><div id="chart_sfd_onsite"></div></div>
+                <div v-if="sfd_view_mode!='numbers'"><div id="chart_sfd_onsite"></div></div>
+              </div>
+
+              <div style="margin-top:1em; color:#888; font-size:.9em;">
+                {{translate("")}}
               </div>
             </div>
 
@@ -677,42 +1129,11 @@ let summary_ghg=new Vue({
     </div>
   `,
 
-  mounted(){
-    this.sync_globals();
-    this._globalsPoll = setInterval(()=>{
-      try{
-        if(!this.visible) return;
-        const w = (typeof window!=="undefined") ? window : {};
-        const changed =
-          (w.Global && this.Global !== w.Global) ||
-          (w.Structure && this.Structure !== w.Structure) ||
-          (w.Formulas && this.Formulas !== w.Formulas) ||
-          (w.Languages && this.Languages !== w.Languages) ||
-          (w.IPCC_categories && this.IPCC_categories !== w.IPCC_categories) ||
-          (w.variable && this.variable !== w.variable) ||
-          (w.Charts && this.Charts !== w.Charts);
-
-        if(changed){
-          this.sync_globals();
-          this.$nextTick(()=>{
-            try{ this.draw_all_charts(); }catch(e){}
-            try{ this.draw_sfd_charts(); }catch(e){}
-          });
-        }
-      }catch(e){}
-    }, 500);
-  },
-
-  beforeDestroy(){
-    try{ if(this._globalsPoll) clearInterval(this._globalsPoll); }catch(e){}
-  },
-
   updated(){
     let _this=this;
     this.$nextTick(()=>{
       try{
-        _this.sync_globals();
-        try{ _this.draw_all_charts(); }catch(e){}
+        _this.draw_all_charts();
         try{ _this.draw_sfd_charts(); }catch(e){}
       }catch(e){
         console.warn(e);
@@ -722,12 +1143,37 @@ let summary_ghg=new Vue({
 
   style:`
     <style>
-      #summary_ghg { padding:1em; }
-      #summary_ghg table { border-collapse:separate; border-spacing:3px; }
-      #summary_ghg table th, #summary_ghg table td { border:none; background:inherit; padding:10px; }
+      #summary_ghg {
+        padding:1em;
+      }
+      #summary_ghg table {
+        border-collapse:separate;
+        border-spacing:3px;
+      }
+      #summary_ghg table th,
+      #summary_ghg table td {
+        border:none;
+        background:inherit;
+        padding:10px;
+      }
+      #summary_ghg div.number_placeholder {
+        width:150px;
+        font-size:large;
+        font-weight:bold;
+        padding:0.5em 0;
+        background:white;
+        border:1px solid var(--color-level-generic);
+        color:var(--color-level-generic);
+        margin:0 5px;
+      }
 
-      #summary_ghg button[selected]{ background:var(--color-level-generic); color:white; outline:none; }
+      #summary_ghg button[selected]{
+        background:var(--color-level-generic);
+        color:white;
+        outline:none;
+      }
 
+      /*pie chart*/
       #summary_ghg div.chart_container {
         background:white;
         border:1px solid #ccc;
@@ -740,6 +1186,49 @@ let summary_ghg=new Vue({
         font-weight:bold;
         display:flex;
         align-items:center;
+      }
+      #summary_ghg div.chart_container div.chart_title img.icon_co2,
+      #summary_ghg div.chart_container div.chart_title img.icon_nrg{
+        width:50px;
+        display:block;
+        margin-right:5px;
+        margin-bottom:5px;
+      }
+      #summary_ghg div.chart_container table.legend {
+        width:38%;
+      }
+
+      #summary_ghg div.chart_container div.bar_background {
+        background:#dadada;
+        width:100%;
+        height:2em;
+      }
+      #summary_ghg div.chart_container div.bar_background div.progress{
+        text-align:center;
+        height:2em;
+      }
+
+      /*bar chart css*/
+      #summary_ghg div.chart_container.bar svg {
+        font: 10px sans-serif;
+        shape-rendering: crispEdges;
+      }
+      #summary_ghg div.chart_container.bar .axis path,
+      #summary_ghg div.chart_container.bar .axis line {
+        fill: none;
+        stroke: #000;
+      }
+      #summary_ghg div.chart_container.bar path.domain {
+        stroke: none;
+      }
+      #summary_ghg div.chart_container.bar .y .tick line {
+        stroke: #ddd;
+      }
+
+      #summary_ghg div.subdivision{
+        display:grid;
+        align-items:center;
+        grid-template-columns:15% 85%;
       }
     </style>
   `,
