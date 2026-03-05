@@ -15,14 +15,14 @@ let summary_ghg=new Vue({
 
     // --- SFD tab (UI only) ---
     sfd_image_dataurl:null,
-    sfd_view_mode:"both",
 
-    // SFD persistence / comparison
-    sfd_assessment_key:"",
-    _sfd_autoload_done_for_key:null,
-    sfd_status_msg:"",
-    sfd_compare_baseline:null,
-    sfd_compare_future:null,
+    // --- SFD Compare (UI only) ---
+    sfd_compare_baseline_json:null,
+    sfd_compare_future_json:null,
+    sfd_compare_baseline_sfd:null,
+    sfd_compare_future_sfd:null,
+    sfd_compare_result:null,
+    sfd_compare_error:"",
 
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
@@ -121,166 +121,151 @@ let summary_ghg=new Vue({
     // SFD tab (UI only)
     // ---------------------------
 
-    
-    // key used to store/retrieve SFD assets per assessment (municipality/scenario)
-    get_sfd_storage_key(){
-      // priority: user-provided key
-      let k = (this.sfd_assessment_key||"").trim();
-
-      // try derive from ECAM globals (best effort, no core-model changes)
-      if(!k){
-        try{
-          const G = this.Global || (typeof window!=="undefined" ? window.Global : null);
-          // attempt common metadata fields
-          const candidates = [
-            G && (G.assessment_name || G.AssessmentName || G.name || G.Name),
-            G && G.country,
-            G && G.city,
-            G && G.municipality,
-          ].filter(Boolean);
-
-          if(candidates.length){
-            k = String(candidates[0]).trim();
+    // --- Compare tab: file uploads ---
+    _read_json_file(file, cb){
+      try{
+        const reader = new FileReader();
+        reader.onload = () => {
+          try{
+            const obj = JSON.parse(String(reader.result||"{}"));
+            cb(null, obj);
+          }catch(err){
+            cb(err, null);
           }
-        }catch(e){}
-      }
-
-      // last resort
-      if(!k) k = "default";
-      return k.replace(/\s+/g," ").slice(0,120);
-    },
-
-    set_sfd_key_from_global_if_empty(){
-      if((this.sfd_assessment_key||"").trim()) return;
-      try{
-        const G = this.Global || (typeof window!=="undefined" ? window.Global : null);
-        const name = G && (G.assessment_name || G.AssessmentName || G.name || G.Name);
-        if(name) this.sfd_assessment_key = String(name).trim();
-      }catch(e){}
-    },
-
-    sfd_ls_key(type){
-      const k = this.get_sfd_storage_key();
-      return `ecam_sfd_${type}::${k}`;
-    },
-
-    sfd_set_status(msg){
-      this.sfd_status_msg = msg || "";
-      if(msg){
-        setTimeout(()=>{ try{ this.sfd_status_msg=""; }catch(e){} }, 3500);
+        };
+        reader.readAsText(file);
+      }catch(e){
+        cb(e, null);
       }
     },
 
-    save_sfd_for_current_key(){
-      try{
-        const img = this.sfd_image_dataurl;
-        if(!img){
-          alert("Upload an SFD graphic first.");
+    load_sfd_compare_baseline_json(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      this._read_json_file(file, (err, obj)=>{
+        if(err){
+          this.sfd_compare_error = "Baseline JSON could not be read.";
+          this.sfd_compare_baseline_json = null;
           return;
         }
-        localStorage.setItem(this.sfd_ls_key("image"), img);
-        localStorage.setItem("ecam_sfd_last_key", this.get_sfd_storage_key());
-        this.sfd_set_status("SFD saved for this assessment.");
-      }catch(e){
-        console.warn(e);
-        alert("Could not save SFD (storage may be full).");
-      }
+        this.sfd_compare_error = "";
+        this.sfd_compare_baseline_json = obj;
+        this.sfd_compare_result = null;
+      });
     },
 
-    load_sfd_for_current_key(){
-      try{
-        const img = localStorage.getItem(this.sfd_ls_key("image"));
-        if(img){
-          this.sfd_image_dataurl = img;
-          this.$nextTick(()=>this.draw_sfd_charts());
-          this.sfd_set_status("SFD loaded.");
-        }else{
-          this.sfd_set_status("No saved SFD found for this key.");
+    load_sfd_compare_future_json(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      this._read_json_file(file, (err, obj)=>{
+        if(err){
+          this.sfd_compare_error = "Future JSON could not be read.";
+          this.sfd_compare_future_json = null;
+          return;
         }
-      }catch(e){
-        console.warn(e);
-        alert("Could not load SFD.");
-      }
+        this.sfd_compare_error = "";
+        this.sfd_compare_future_json = obj;
+        this.sfd_compare_result = null;
+      });
     },
 
-    auto_load_sfd_if_available(){
-      // run once per key, mainly after a JSON import refreshes window.Global
-      const k = this.get_sfd_storage_key();
-      if(this._sfd_autoload_done_for_key === k) return;
-      this._sfd_autoload_done_for_key = k;
+    load_sfd_compare_baseline_sfd(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      const ok = /image\/(png|jpeg)/i.test(file.type);
+      if(!ok){ alert("Please upload a PNG or JPG image."); return; }
+      const reader = new FileReader();
+      reader.onload = () => { this.sfd_compare_baseline_sfd = reader.result; };
+      reader.readAsDataURL(file);
+    },
 
-      // if user previously used a key, restore it when empty
+    load_sfd_compare_future_sfd(ev){
+      const file = ev && ev.target && ev.target.files ? ev.target.files[0] : null;
+      if(!file) return;
+      const ok = /image\/(png|jpeg)/i.test(file.type);
+      if(!ok){ alert("Please upload a PNG or JPG image."); return; }
+      const reader = new FileReader();
+      reader.onload = () => { this.sfd_compare_future_sfd = reader.result; };
+      reader.readAsDataURL(file);
+    },
+
+    // --- Compare tab: read emissions from ECAM export JSON (best-effort, UI-only) ---
+    _get_number_by_paths(obj, paths){
       try{
-        const last = localStorage.getItem("ecam_sfd_last_key");
-        if(!(this.sfd_assessment_key||"").trim() && last){
-          this.sfd_assessment_key = last;
+        for(const p of paths){
+          let cur = obj;
+          let ok = true;
+          for(const k of p){
+            if(cur && Object.prototype.hasOwnProperty.call(cur, k)){
+              cur = cur[k];
+            }else{
+              ok = false; break;
+            }
+          }
+          if(ok && cur!==undefined && cur!==null && cur!=="" && !isNaN(Number(cur))){
+            return Number(cur);
+          }
         }
       }catch(e){}
-
-      // load SFD image & snapshots if they exist
-      this.load_sfd_for_current_key();
-      this.load_sfd_snapshots_for_current_key();
+      return 0;
     },
 
-    snapshot_sfd_state(){
-      const e = this.get_sfd_emissions();
-      const unit = this.current_unit_ghg;
-      const now = new Date().toISOString();
+    extract_emissions_from_ecam_json(obj){
+      // Try common locations. If your export has different keys, we can add paths without changing ECAM core.
+      const offsite_collection = this._get_number_by_paths(obj, [
+        ["offsite_collection"],
+        ["results_summary_ghg","offsite_collection"],
+        ["results","summary","ghg","offsite_collection"],
+      ]);
+      const offsite_transport = this._get_number_by_paths(obj, [
+        ["offsite_transport"],
+        ["results_summary_ghg","offsite_transport"],
+        ["results","summary","ghg","offsite_transport"],
+      ]);
+      const offsite_treatment = this._get_number_by_paths(obj, [
+        ["offsite_treatment"],
+        ["results_summary_ghg","offsite_treatment"],
+        ["results","summary","ghg","offsite_treatment"],
+      ]);
+
+      const onsite_containment = this._get_number_by_paths(obj, [
+        ["onsite_containment"],
+        ["results_summary_ghg","onsite_containment"],
+        ["results","summary","ghg","onsite_containment"],
+      ]);
+      const onsite_emptying = this._get_number_by_paths(obj, [
+        ["onsite_emptying"],
+        ["results_summary_ghg","onsite_emptying"],
+        ["results","summary","ghg","onsite_emptying"],
+      ]);
+      const onsite_treatment = this._get_number_by_paths(obj, [
+        ["onsite_treatment"],
+        ["results_summary_ghg","onsite_treatment"],
+        ["results","summary","ghg","onsite_treatment"],
+      ]);
+      const onsite_discharge = this._get_number_by_paths(obj, [
+        ["onsite_discharge"],
+        ["results_summary_ghg","onsite_discharge"],
+        ["results","summary","ghg","onsite_discharge"],
+      ]);
+
+      const baselineLike = offsite_collection+offsite_transport+offsite_treatment+onsite_containment+onsite_emptying+onsite_treatment+onsite_discharge;
       return {
-        key: this.get_sfd_storage_key(),
-        ts: now,
-        unit,
-        offsite: e.offsite,
-        onsite: e.onsite,
-        total: (e.offsite.total||0) + (e.onsite.total||0),
+        offsite:{
+          Collection: offsite_collection,
+          Transport: offsite_transport,
+          Treatment: offsite_treatment,
+          total: offsite_collection+offsite_transport+offsite_treatment,
+        },
+        onsite:{
+          Containment: onsite_containment,
+          Emptying: onsite_emptying,
+          Treatment: onsite_treatment,
+          Discharge: onsite_discharge,
+          total: onsite_containment+onsite_emptying+onsite_treatment+onsite_discharge,
+        },
+        total: baselineLike,
       };
-    },
-
-    save_snapshot_baseline(){
-      try{
-        const snap = this.snapshot_sfd_state();
-        localStorage.setItem(this.sfd_ls_key("baseline"), JSON.stringify(snap));
-        this.sfd_compare_baseline = snap;
-        this.sfd_set_status("Baseline saved.");
-      }catch(e){
-        console.warn(e);
-        alert("Could not save baseline snapshot.");
-      }
-    },
-
-    save_snapshot_future(){
-      try{
-        const snap = this.snapshot_sfd_state();
-        localStorage.setItem(this.sfd_ls_key("future"), JSON.stringify(snap));
-        this.sfd_compare_future = snap;
-        this.sfd_set_status("Future (2040) saved.");
-      }catch(e){
-        console.warn(e);
-        alert("Could not save future snapshot.");
-      }
-    },
-
-    load_sfd_snapshots_for_current_key(){
-      try{
-        const b = localStorage.getItem(this.sfd_ls_key("baseline"));
-        const f = localStorage.getItem(this.sfd_ls_key("future"));
-        this.sfd_compare_baseline = b ? JSON.parse(b) : null;
-        this.sfd_compare_future   = f ? JSON.parse(f) : null;
-      }catch(e){
-        console.warn(e);
-        this.sfd_compare_baseline = null;
-        this.sfd_compare_future = null;
-      }
-    },
-
-    clear_sfd_snapshots_for_current_key(){
-      try{
-        localStorage.removeItem(this.sfd_ls_key("baseline"));
-        localStorage.removeItem(this.sfd_ls_key("future"));
-      }catch(e){}
-      this.sfd_compare_baseline = null;
-      this.sfd_compare_future = null;
-      this.sfd_set_status("Comparison cleared.");
     },
 
     compare_delta(a,b){
@@ -290,7 +275,37 @@ let summary_ghg=new Vue({
       return {diff, pct};
     },
 
-on_sfd_file_change(ev){
+    generate_sfd_comparison(){
+      this.sfd_compare_error = "";
+      this.sfd_compare_result = null;
+
+      if(!this.sfd_compare_baseline_json || !this.sfd_compare_future_json){
+        this.sfd_compare_error = "Please upload both Baseline and Future ECAM JSON files.";
+        return;
+      }
+
+      try{
+        const B = this.extract_emissions_from_ecam_json(this.sfd_compare_baseline_json);
+        const F = this.extract_emissions_from_ecam_json(this.sfd_compare_future_json);
+
+        // If all values are zero, likely paths did not match the export
+        const allZero = (B.total===0 && F.total===0);
+        if(allZero){
+          this.sfd_compare_error = "Could not find emission totals in the uploaded ECAM JSON files. Export format may differ.";
+        }
+
+        this.sfd_compare_result = {baseline:B, future:F};
+      }catch(e){
+        console.warn(e);
+        this.sfd_compare_error = "Comparison failed: invalid ECAM JSON format.";
+      }
+    },
+
+    // ---------------------------
+    // SFD image upload (current scenario)
+    // ---------------------------
+
+    on_sfd_file_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target && ev.target.files ? ev.target.files[0] : null : null;
       if(!file) return;
 
@@ -672,13 +687,6 @@ get_sfd_emissions(){
   watch:{
     current_view(newV){
       this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
-    },
-    sfd_assessment_key(){
-      try{
-        // When key changes, load stored assets for that key
-        this._sfd_autoload_done_for_key = null;
-        this.auto_load_sfd_if_available();
-      }catch(e){}
     }
   },
 
@@ -698,6 +706,7 @@ get_sfd_emissions(){
         <button @click="current_view='charts_nrg'" :selected="current_view=='charts_nrg'"  type="button">{{translate("Charts Energy")             }}</button>
         <button @click="current_view='charts_pop'" :selected="current_view=='charts_pop'"  type="button">{{translate("Charts Serviced population")}}</button>
         <button type="button" @click.prevent="current_view='sfd'" :selected="current_view=='sfd'" >SFD</button>
+        <button type="button" @click.prevent="current_view='sfd_compare'" :selected="current_view=='sfd_compare'" >SFD Compare</button>
         <hr style="border-color:#eee">
         <div>
           <tutorial_tip
@@ -1236,27 +1245,14 @@ get_sfd_emissions(){
         <!--SFD-->
         <div v-if="current_view=='sfd'">
                     <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
-            <div style="display:flex;gap:.75em;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:.5em;">
-              <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;">
-                <b style="margin-right:.25em;">Assessment key</b>
-                <input v-model="sfd_assessment_key" placeholder="e.g., Zaragoza – Baseline / 2040" style="padding:.35em .5em;border:1px solid #ccc;border-radius:4px;min-width:260px;">
-                <button type="button" @click.prevent="load_sfd_for_current_key()">Load SFD</button>
-                <button type="button" @click.prevent="save_sfd_for_current_key()" :disabled="!sfd_image_dataurl">Save SFD</button>
-                <span v-if="sfd_status_msg" style="color:#2c6; font-weight:600; margin-left:.25em;">{{sfd_status_msg}}</span>
-              </div>
-
-              <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
-                <button type="button" @click.prevent="download_sfd_jpg()">Download JPG</button>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:1em;flex-wrap:wrap;">
+            <div style="display:flex;gap:.75em;align-items:center;justify-content:space-between;flex-wrap:wrap;">
               <div>
                 <b>Upload SFD graphic</b><br>
                 <input type="file" accept="image/png,image/jpeg" @change="on_sfd_file_change">
                 <button type="button" v-if="sfd_image_dataurl" @click.prevent="clear_sfd_image()" style="margin-left:.5em;">Remove</button>
               </div>
-              <div style="color:#666; font-size:.9em;">
-                
+              <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+                <button type="button" @click.prevent="download_sfd_jpg()" :disabled="!sfd_image_dataurl">Download JPG</button>
               </div>
             </div>
           </div>
@@ -1293,6 +1289,50 @@ get_sfd_emissions(){
                 </div>
                 <div><div id="chart_sfd_onsite"></div></div>
               </div>
+
+              <div style="margin-top:1em;">
+                <div v-if="sfd_compare_baseline || sfd_compare_future" style="border-top:1px solid #eee; padding-top:1em;">
+                  <div style="font-weight:700; color:var(--color-level-generic); margin-bottom:.5em;">Comparison (Baseline vs Future 2040)</div>
+
+                  <table class="legend" style="width:100%;">
+                    <tr style="font-weight:700;">
+                      <td></td>
+                      <td style="text-align:right;">Baseline</td>
+                      <td style="text-align:right;">Future</td>
+                      <td style="text-align:right;">Δ</td>
+                      <td style="text-align:right;">Δ%</td>
+                    </tr>
+
+                    <tr>
+                      <td>Total offsite</td>
+                      <td style="text-align:right;">{{ sfd_compare_baseline ? format_emission(sfd_compare_baseline.offsite.total) : "-" }}</td>
+                      <td style="text-align:right;">{{ sfd_compare_future ? format_emission(sfd_compare_future.offsite.total) : "-" }}</td>
+                      <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future) ? format_emission(compare_delta(sfd_compare_baseline.offsite.total, sfd_compare_future.offsite.total).diff) : "-" }}</td>
+                      <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future && compare_delta(sfd_compare_baseline.offsite.total, sfd_compare_future.offsite.total).pct!==null) ? format(compare_delta(sfd_compare_baseline.offsite.total, sfd_compare_future.offsite.total).pct,1,1)+'%' : "-" }}</td>
+                    </tr>
+
+                    <tr>
+                      <td>Total onsite</td>
+                      <td style="text-align:right;">{{ sfd_compare_baseline ? format_emission(sfd_compare_baseline.onsite.total) : "-" }}</td>
+                      <td style="text-align:right;">{{ sfd_compare_future ? format_emission(sfd_compare_future.onsite.total) : "-" }}</td>
+                      <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future) ? format_emission(compare_delta(sfd_compare_baseline.onsite.total, sfd_compare_future.onsite.total).diff) : "-" }}</td>
+                      <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future && compare_delta(sfd_compare_baseline.onsite.total, sfd_compare_future.onsite.total).pct!==null) ? format(compare_delta(sfd_compare_baseline.onsite.total, sfd_compare_future.onsite.total).pct,1,1)+'%' : "-" }}</td>
+                    </tr>
+
+                    <tr style="font-weight:700;">
+                      <td>Total (offsite+onsite)</td>
+                      <td style="text-align:right;">{{ sfd_compare_baseline ? format_emission(sfd_compare_baseline.total) : "-" }}</td>
+                      <td style="text-align:right;">{{ sfd_compare_future ? format_emission(sfd_compare_future.total) : "-" }}</td>
+                      <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future) ? format_emission(compare_delta(sfd_compare_baseline.total, sfd_compare_future.total).diff) : "-" }}</td>
+                      <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future && compare_delta(sfd_compare_baseline.total, sfd_compare_future.total).pct!==null) ? format(compare_delta(sfd_compare_baseline.total, sfd_compare_future.total).pct,1,1)+'%' : "-" }}</td>
+                    </tr>
+                  </table>
+
+                  <div style="margin-top:.5em; color:#777; font-size:.9em;">
+                    Unit shown: {{current_unit_ghg}}. Baseline/Future are stored per “Assessment key” in your browser.
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="chart_container">
@@ -1310,74 +1350,156 @@ get_sfd_emissions(){
         <!--SFD Compare-->
         <div v-if="current_view=='sfd_compare'">
           <div style="margin:1em 0; padding:1em; border:1px solid #ccc;">
-            <div style="display:flex;gap:.75em;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:.5em;">
-              <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;">
-                <b style="margin-right:.25em;">Assessment key</b>
-                <input v-model="sfd_assessment_key" placeholder="e.g., Zaragoza – Baseline / 2040" style="padding:.35em .5em;border:1px solid #ccc;border-radius:4px;min-width:260px;">
-                <button type="button" @click.prevent="load_sfd_snapshots_for_current_key()">Load snapshots</button>
-                <span v-if="sfd_status_msg" style="color:#2c6; font-weight:600; margin-left:.25em;">{{sfd_status_msg}}</span>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1em;">
+              <div>
+                <b>Baseline scenario</b><br>
+                <div style="margin-top:.4em;">
+                  <div style="margin-bottom:.35em;">
+                    <span style="font-weight:600;">Upload ECAM JSON</span><br>
+                    <input type="file" accept=".json,application/json" @change="load_sfd_compare_baseline_json">
+                  </div>
+                  <div>
+                    <span style="font-weight:600;">Upload SFD graphic</span><br>
+                    <input type="file" accept="image/png,image/jpeg" @change="load_sfd_compare_baseline_sfd">
+                  </div>
+                </div>
               </div>
 
-              <div style="display:flex;gap:.5em;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
-                <button type="button" @click.prevent="save_snapshot_baseline()">Save Baseline (current)</button>
-                <button type="button" @click.prevent="save_snapshot_future()">Save Future 2040 (current)</button>
-                <button type="button" @click.prevent="clear_sfd_snapshots_for_current_key()" :disabled="!sfd_compare_baseline && !sfd_compare_future">Clear</button>
+              <div>
+                <b>Future scenario (e.g., 2040)</b><br>
+                <div style="margin-top:.4em;">
+                  <div style="margin-bottom:.35em;">
+                    <span style="font-weight:600;">Upload ECAM JSON</span><br>
+                    <input type="file" accept=".json,application/json" @change="load_sfd_compare_future_json">
+                  </div>
+                  <div>
+                    <span style="font-weight:600;">Upload SFD graphic</span><br>
+                    <input type="file" accept="image/png,image/jpeg" @change="load_sfd_compare_future_sfd">
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div style="color:#666; font-size:.92em; line-height:1.35;">
-              <b>How to use:</b> run a scenario in ECAM → come here → save as Baseline or Future → then the table below shows the delta.
+            <div style="margin-top:1em; display:flex; gap:.75em; align-items:center; flex-wrap:wrap;">
+              <button type="button" @click.prevent="generate_sfd_comparison()" :disabled="!sfd_compare_baseline_json || !sfd_compare_future_json">Generate comparison</button>
+              <span v-if="sfd_compare_error" style="color:#b91c1c; font-weight:600;">{{sfd_compare_error}}</span>
             </div>
           </div>
 
-          <div class="chart_container">
-            <div class="chart_title">Comparison (Baseline vs Future 2040)</div>
+          <div class="chart_container" v-if="sfd_compare_result">
+            <div class="chart_title">Comparison (Baseline vs Future)</div>
 
-            <div v-if="!(sfd_compare_baseline || sfd_compare_future)" style="color:#888; padding:1em; border:1px dashed #ccc; margin-top:1em;">
-              No snapshots saved yet for this Assessment key.
+            <table class="legend" style="width:100%; margin-top:1em;">
+              <tr style="font-weight:700;">
+                <td></td>
+                <td style="text-align:right;">Baseline</td>
+                <td style="text-align:right;">Future</td>
+                <td style="text-align:right;">Δ</td>
+                <td style="text-align:right;">Δ%</td>
+              </tr>
+
+              <tr style="font-weight:700;"><td colspan="5" style="padding-top:.6em;">OFFSITE SANITATION</td></tr>
+              <tr>
+                <td>Collection</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.Collection)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.Collection)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.Collection, sfd_compare_result.future.offsite.Collection).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.Collection, sfd_compare_result.future.offsite.Collection).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.Collection, sfd_compare_result.future.offsite.Collection).pct,1,1)+'%'}} </td>
+              </tr>
+              <tr>
+                <td>Transport</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.Transport)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.Transport)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.Transport, sfd_compare_result.future.offsite.Transport).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.Transport, sfd_compare_result.future.offsite.Transport).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.Transport, sfd_compare_result.future.offsite.Transport).pct,1,1)+'%'}} </td>
+              </tr>
+              <tr>
+                <td>Treatment</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.Treatment)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.Treatment)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.Treatment, sfd_compare_result.future.offsite.Treatment).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.Treatment, sfd_compare_result.future.offsite.Treatment).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.Treatment, sfd_compare_result.future.offsite.Treatment).pct,1,1)+'%'}} </td>
+              </tr>
+              <tr style="font-weight:700;">
+                <td>Total offsite</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.offsite.total)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.offsite.total)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.offsite.total, sfd_compare_result.future.offsite.total).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.offsite.total, sfd_compare_result.future.offsite.total).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.offsite.total, sfd_compare_result.future.offsite.total).pct,1,1)+'%'}} </td>
+              </tr>
+
+              <tr style="font-weight:700;"><td colspan="5" style="padding-top:.9em;">ONSITE SANITATION</td></tr>
+              <tr>
+                <td>Containment</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Containment)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Containment)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Containment, sfd_compare_result.future.onsite.Containment).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Containment, sfd_compare_result.future.onsite.Containment).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Containment, sfd_compare_result.future.onsite.Containment).pct,1,1)+'%'}} </td>
+              </tr>
+              <tr>
+                <td>Emptying</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Emptying)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Emptying)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Emptying, sfd_compare_result.future.onsite.Emptying).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Emptying, sfd_compare_result.future.onsite.Emptying).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Emptying, sfd_compare_result.future.onsite.Emptying).pct,1,1)+'%'}} </td>
+              </tr>
+              <tr>
+                <td>Treatment</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Treatment)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Treatment)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Treatment, sfd_compare_result.future.onsite.Treatment).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Treatment, sfd_compare_result.future.onsite.Treatment).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Treatment, sfd_compare_result.future.onsite.Treatment).pct,1,1)+'%'}} </td>
+              </tr>
+              <tr>
+                <td>Discharge</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.Discharge)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.Discharge)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.Discharge, sfd_compare_result.future.onsite.Discharge).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.Discharge, sfd_compare_result.future.onsite.Discharge).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.Discharge, sfd_compare_result.future.onsite.Discharge).pct,1,1)+'%'}} </td>
+              </tr>
+              <tr style="font-weight:700;">
+                <td>Total onsite</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.baseline.onsite.total)}}</td>
+                <td style="text-align:right;">{{format_emission(sfd_compare_result.future.onsite.total)}}</td>
+                <td style="text-align:right;">{{format_emission(compare_delta(sfd_compare_result.baseline.onsite.total, sfd_compare_result.future.onsite.total).diff)}}</td>
+                <td style="text-align:right;">{{compare_delta(sfd_compare_result.baseline.onsite.total, sfd_compare_result.future.onsite.total).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.onsite.total, sfd_compare_result.future.onsite.total).pct,1,1)+'%'}} </td>
+              </tr>
+
+              <tr style="font-weight:700;">
+                <td style="padding-top:.9em;">Total (offsite+onsite)</td>
+                <td style="text-align:right; padding-top:.9em;">{{format_emission(sfd_compare_result.baseline.total)}}</td>
+                <td style="text-align:right; padding-top:.9em;">{{format_emission(sfd_compare_result.future.total)}}</td>
+                <td style="text-align:right; padding-top:.9em;">{{format_emission(compare_delta(sfd_compare_result.baseline.total, sfd_compare_result.future.total).diff)}}</td>
+                <td style="text-align:right; padding-top:.9em;">{{compare_delta(sfd_compare_result.baseline.total, sfd_compare_result.future.total).pct===null ? '-' : format(compare_delta(sfd_compare_result.baseline.total, sfd_compare_result.future.total).pct,1,1)+'%'}} </td>
+              </tr>
+            </table>
+
+            <div style="margin-top:.6em; color:#777; font-size:.9em;">
+              Unit shown: {{current_unit_ghg}} (from ECAM UI).
             </div>
+          </div>
 
-            <div v-else style="margin-top:1em;">
-              <table class="legend" style="width:100%;">
-                <tr style="font-weight:700;">
-                  <td></td>
-                  <td style="text-align:right;">Baseline</td>
-                  <td style="text-align:right;">Future</td>
-                  <td style="text-align:right;">Δ</td>
-                  <td style="text-align:right;">Δ%</td>
-                </tr>
-
-                <tr>
-                  <td>Total offsite</td>
-                  <td style="text-align:right;">{{ sfd_compare_baseline ? format_emission(sfd_compare_baseline.offsite.total) : "-" }}</td>
-                  <td style="text-align:right;">{{ sfd_compare_future ? format_emission(sfd_compare_future.offsite.total) : "-" }}</td>
-                  <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future) ? format_emission(compare_delta(sfd_compare_baseline.offsite.total, sfd_compare_future.offsite.total).diff) : "-" }}</td>
-                  <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future && compare_delta(sfd_compare_baseline.offsite.total, sfd_compare_future.offsite.total).pct!==null) ? format(compare_delta(sfd_compare_baseline.offsite.total, sfd_compare_future.offsite.total).pct,1,1)+'%' : "-" }}</td>
-                </tr>
-
-                <tr>
-                  <td>Total onsite</td>
-                  <td style="text-align:right;">{{ sfd_compare_baseline ? format_emission(sfd_compare_baseline.onsite.total) : "-" }}</td>
-                  <td style="text-align:right;">{{ sfd_compare_future ? format_emission(sfd_compare_future.onsite.total) : "-" }}</td>
-                  <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future) ? format_emission(compare_delta(sfd_compare_baseline.onsite.total, sfd_compare_future.onsite.total).diff) : "-" }}</td>
-                  <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future && compare_delta(sfd_compare_baseline.onsite.total, sfd_compare_future.onsite.total).pct!==null) ? format(compare_delta(sfd_compare_baseline.onsite.total, sfd_compare_future.onsite.total).pct,1,1)+'%' : "-" }}</td>
-                </tr>
-
-                <tr style="font-weight:700;">
-                  <td>Total (offsite+onsite)</td>
-                  <td style="text-align:right;">{{ sfd_compare_baseline ? format_emission(sfd_compare_baseline.total) : "-" }}</td>
-                  <td style="text-align:right;">{{ sfd_compare_future ? format_emission(sfd_compare_future.total) : "-" }}</td>
-                  <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future) ? format_emission(compare_delta(sfd_compare_baseline.total, sfd_compare_future.total).diff) : "-" }}</td>
-                  <td style="text-align:right;">{{ (sfd_compare_baseline && sfd_compare_future && compare_delta(sfd_compare_baseline.total, sfd_compare_future.total).pct!==null) ? format(compare_delta(sfd_compare_baseline.total, sfd_compare_future.total).pct,1,1)+'%' : "-" }}</td>
-                </tr>
-              </table>
-
-              <div style="margin-top:.5em; color:#777; font-size:.9em;">
-                Unit shown: {{current_unit_ghg}}. Baseline/Future are stored per “Assessment key” in your browser.
+          <div v-if="sfd_compare_baseline_sfd || sfd_compare_future_sfd" class="chart_container" style="margin-top:1em;">
+            <div class="chart_title">SFD graphics (Baseline vs Future)</div>
+            <div style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start; margin-top:1em;">
+              <div>
+                <b>Baseline SFD</b>
+                <div style="margin-top:.5em;">
+                  <img v-if="sfd_compare_baseline_sfd" :src="sfd_compare_baseline_sfd" style="max-width:100%; height:auto; display:block; border:1px solid #ddd;">
+                  <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No image uploaded.</div>
+                </div>
+              </div>
+              <div>
+                <b>Future SFD</b>
+                <div style="margin-top:.5em;">
+                  <img v-if="sfd_compare_future_sfd" :src="sfd_compare_future_sfd" style="max-width:100%; height:auto; display:block; border:1px solid #ddd;">
+                  <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">No image uploaded.</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
+
 
         </div>
 
@@ -1390,8 +1512,6 @@ get_sfd_emissions(){
     this.$nextTick(()=>{
       try{
         _this.sync_globals();
-        _this.set_sfd_key_from_global_if_empty();
-        _this.auto_load_sfd_if_available();
 
         _this.draw_all_charts();
         try{ _this.draw_sfd_charts(); }catch(e){}
