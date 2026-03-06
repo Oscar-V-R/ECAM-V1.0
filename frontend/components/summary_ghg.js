@@ -27,6 +27,8 @@ let summary_ghg=new Vue({
     // --- SFD Compare uploads (no impact on ECAM core) ---
     compare_baseline_json:null,
     compare_future_json:null,
+    compare_baseline_json_text:"",
+    compare_future_json_text:"",
     compare_baseline_meta:"",
     compare_future_meta:"",
     compare_baseline_sfd:null,
@@ -523,12 +525,15 @@ on_compare_json_upload(which, ev){
     const reader = new FileReader();
     reader.onload = (e)=>{
       try{
-        const obj = JSON.parse(e.target.result);
+        const rawText = String(e.target.result || "");
+        const obj = JSON.parse(rawText);
         if(which==='baseline'){
           this.compare_baseline_json = obj;
+          this.compare_baseline_json_text = rawText;
           this.compare_baseline_meta = file.name;
         }else{
           this.compare_future_json = obj;
+          this.compare_future_json_text = rawText;
           this.compare_future_meta = file.name;
         }
         this.compare_error = "";
@@ -560,6 +565,8 @@ on_compare_sfd_upload(which, ev){
 clear_compare_uploads(){
   this.compare_baseline_json = null;
   this.compare_future_json = null;
+  this.compare_baseline_json_text = "";
+  this.compare_future_json_text = "";
   this.compare_baseline_meta = "";
   this.compare_future_meta = "";
   this.compare_baseline_sfd = null;
@@ -589,23 +596,32 @@ get_compare_rows_onsite(){
   return (this.compare_rows||[]).filter(r=>r.section==='onsite');
 },
 
-// Traverse JSON and try to find values for ECAM components (works for nested objects and label/value arrays)
-extract_ecam_components_from_json(root){
+// Traverse JSON and try to find values for ECAM components (parsed JSON + raw JSON text)
+extract_ecam_components_from_json(root, rawText){
   const targets = {
-    offsite_collection: ["offsite_collection","collection_offsite","offsite collection","collection (offsite)","collection"],
-    offsite_transport : ["offsite_transport","transport_offsite","offsite transport","transport (offsite)","transport"],
-    offsite_treatment : ["offsite_treatment","treatment_offsite","offsite treatment","treatment (offsite)","treatment"],
-    onsite_containment: ["onsite_containment","containment_onsite","onsite containment","containment (onsite)","containment"],
-    onsite_emptying   : ["onsite_emptying","emptying_onsite","onsite emptying","emptying (onsite)","emptying"],
-    onsite_treatment  : ["onsite_treatment","treatment_onsite","onsite treatment","treatment (onsite)","treatment"],
-    onsite_discharge  : ["onsite_discharge","discharge_onsite","onsite discharge","discharge (onsite)","discharge"],
+    offsite_collection: ["offsite_collection","collection_offsite","offsite collection","collection (offsite)"],
+    offsite_transport : ["offsite_transport","transport_offsite","offsite transport","transport (offsite)"],
+    offsite_treatment : ["offsite_treatment","treatment_offsite","offsite treatment","treatment (offsite)"],
+    onsite_containment: ["onsite_containment","containment_onsite","onsite containment","containment (onsite)"],
+    onsite_emptying   : ["onsite_emptying","emptying_onsite","onsite emptying","emptying (onsite)"],
+    onsite_treatment  : ["onsite_treatment","treatment_onsite","onsite treatment","treatment (onsite)"],
+    onsite_discharge  : ["onsite_discharge","discharge_onsite","onsite discharge","discharge (onsite)"],
   };
 
   const found = {};
   const flat = [];
 
+  const asNum = (v)=>{
+    if(typeof v === "number") return isFinite(v) ? v : NaN;
+    if(typeof v === "string"){
+      const n = Number(String(v).replace(/,/g,''));
+      return isFinite(n) ? n : NaN;
+    }
+    return NaN;
+  };
+
   const pushFlat = (k, v, path, label)=>{
-    const num = (typeof v === "number") ? v : (typeof v === "string" ? Number(v) : NaN);
+    const num = asNum(v);
     if(!isFinite(num)) return;
     flat.push({k:String(k||""), label:String(label||""), path:String(path||""), v:num});
   };
@@ -613,13 +629,10 @@ extract_ecam_components_from_json(root){
   const walk = (node, path)=>{
     if(node===null || node===undefined) return;
     if(Array.isArray(node)){
-      for(let i=0;i<node.length;i++){
-        walk(node[i], path+"["+i+"]");
-      }
+      for(let i=0;i<node.length;i++) walk(node[i], path+"["+i+"]");
       return;
     }
     if(typeof node === "object"){
-      // label/value pattern
       const hasValue = Object.prototype.hasOwnProperty.call(node,"value");
       const hasLabel = Object.prototype.hasOwnProperty.call(node,"label") || Object.prototype.hasOwnProperty.call(node,"name") || Object.prototype.hasOwnProperty.call(node,"title");
       if(hasValue && hasLabel){
@@ -634,41 +647,86 @@ extract_ecam_components_from_json(root){
       }
     }
   };
-
   walk(root, "$");
 
-  const score = (item, needOffsite, needOnsite, kw)=>{
+  const scoreItem = (item, aliases, needOffsite, needOnsite)=>{
     const s = (item.k+" "+item.label+" "+item.path).toLowerCase();
     let sc = 0;
-    if(kw && s.includes(kw)) sc += 5;
-    if(needOffsite && (s.includes("offsite") || s.includes("off-site"))) sc += 3;
-    if(needOnsite  && (s.includes("onsite")  || s.includes("on-site"))) sc += 3;
+
+    aliases.forEach(a=>{
+      const kw = String(a).toLowerCase();
+      if(s.includes(kw)) sc += 25;
+      if(item.k.toLowerCase()===kw) sc += 40;
+      if(item.label.toLowerCase()===kw) sc += 20;
+    });
+
+    if(needOffsite && (s.includes("offsite") || s.includes("off-site"))) sc += 20;
+    if(needOnsite  && (s.includes("onsite")  || s.includes("on-site")))  sc += 20;
+
+    if(s.includes("ghg")) sc += 25;
+    if(s.includes("co2eq")) sc += 25;
+    if(s.includes("co2")) sc += 15;
+    if(s.includes("emission")) sc += 20;
+    if(s.includes("kpi")) sc += 15;
+    if(s.includes("result")) sc += 15;
+    if(s.includes("summary")) sc += 10;
+
+    if(s.includes("inventory")) sc -= 20;
+    if(s.includes("population")) sc -= 15;
+    if(s.includes("energy")) sc -= 15;
+    if(s.includes("nrg")) sc -= 15;
+
     return sc;
   };
 
-  const pick = (aliases, needOffsite, needOnsite)=>{
+  const pickFromFlat = (aliases, needOffsite, needOnsite)=>{
     let best = null;
     let bestScore = -1;
-    for(const a of aliases){
-      const kw = String(a).toLowerCase();
-      for(const item of flat){
-        const sc = score(item, needOffsite, needOnsite, kw);
-        if(sc > bestScore){
-          bestScore = sc;
-          best = item;
-        }
-      }
-    }
-    // require at least a minimal match
-    if(best && bestScore >= 5) return best.v;
-    // fallback: try strict key hits
     for(const item of flat){
-      const key = item.k.toLowerCase();
-      for(const a of aliases){
-        if(key === String(a).toLowerCase()) return item.v;
+      const sc = scoreItem(item, aliases, needOffsite, needOnsite);
+      if(sc > bestScore || (sc===bestScore && best && item.v > best.v)){
+        bestScore = sc;
+        best = item;
       }
     }
+    if(best && bestScore >= 25) return Number(best.v||0);
     return 0;
+  };
+
+  const escapeRe = (s)=>String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pickFromRaw = (aliases)=>{
+    const txt = String(rawText || "");
+    if(!txt) return 0;
+    let best = {score:-1, value:0};
+    aliases.forEach(alias=>{
+      const a = escapeRe(alias);
+      const patterns = [
+        new RegExp('"'+a+'"\\s*:\\s*([-]?[0-9][0-9,]*(?:\\.[0-9]+)?)','ig'),
+        new RegExp('"'+a+'"[^\\n\\r]{0,180}?"value"\\s*:\\s*([-]?[0-9][0-9,]*(?:\\.[0-9]+)?)','ig'),
+        new RegExp('"label"\\s*:\\s*"'+a+'"[^\\n\\r]{0,180}?"value"\\s*:\\s*([-]?[0-9][0-9,]*(?:\\.[0-9]+)?)','ig'),
+      ];
+      patterns.forEach((re, idx)=>{
+        let m;
+        while((m = re.exec(txt))){
+          const v = Number(String(m[1]).replace(/,/g,''));
+          if(!isFinite(v)) continue;
+          const around = txt.slice(Math.max(0, m.index-120), Math.min(txt.length, m.index+240)).toLowerCase();
+          let sc = 20 - idx;
+          if(around.includes("ghg")) sc += 20;
+          if(around.includes("co2eq")) sc += 20;
+          if(around.includes("emission")) sc += 15;
+          if(around.includes("result")) sc += 10;
+          if(sc > best.score || (sc===best.score && v > best.value)) best = {score:sc, value:v};
+        }
+      });
+    });
+    return best.score >= 20 ? best.value : 0;
+  };
+
+  const pick = (aliases, needOffsite, needOnsite)=>{
+    const a = pickFromFlat(aliases, needOffsite, needOnsite);
+    const b = pickFromRaw(aliases);
+    return Math.max(Number(a||0), Number(b||0));
   };
 
   found.offsite_collection = pick(targets.offsite_collection, true, false);
@@ -679,7 +737,6 @@ extract_ecam_components_from_json(root){
   found.onsite_treatment   = pick(targets.onsite_treatment,   false, true);
   found.onsite_discharge   = pick(targets.onsite_discharge,   false, true);
 
-  // totals
   found.total_offsite = found.offsite_collection + found.offsite_transport + found.offsite_treatment;
   found.total_onsite  = found.onsite_containment + found.onsite_emptying + found.onsite_treatment + found.onsite_discharge;
   found.total         = found.total_offsite + found.total_onsite;
@@ -695,8 +752,8 @@ generate_compare_from_uploads(){
       return;
     }
 
-    const b = this.extract_ecam_components_from_json(this.compare_baseline_json);
-    const f = this.extract_ecam_components_from_json(this.compare_future_json);
+    const b = this.extract_ecam_components_from_json(this.compare_baseline_json, this.compare_baseline_json_text);
+    const f = this.extract_ecam_components_from_json(this.compare_future_json, this.compare_future_json_text);
 
     this.compare_b = b;
     this.compare_f = f;
@@ -1079,7 +1136,12 @@ draw_compare_pies(b,f){
 
   watch:{
     current_view(newV){
-      this.$nextTick(()=>{ try{ if(newV==='sfd') this.draw_sfd_charts(); }catch(e){} });
+      this.$nextTick(()=>{
+        try{
+          if(newV==='sfd') this.draw_sfd_charts();
+          if(newV==='sfd_compare' && this.compare_b && this.compare_f) this.draw_compare_pies(this.compare_b, this.compare_f);
+        }catch(e){}
+      });
     },
     sfd_assessment_key(){
       try{
