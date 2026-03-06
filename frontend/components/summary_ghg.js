@@ -1697,7 +1697,7 @@ draw_compare_pies(b,f){
               <div class="chart_title">SFD graphic</div>
               <div style="margin-top:1em;">
                 <div v-if="sfd_image_dataurl">
-                  <img :src="sfd_image_dataurl" style="width:100%; max-width:100%; height:auto; display:block; margin:0 auto; border:1px solid #ddd; object-fit:contain;">
+                  <img :src="sfd_image_dataurl" style="display:block; width:100%; max-width:100%; height:auto; max-height:72vh; margin:0 auto; border:1px solid #ddd; object-fit:contain; box-sizing:border-box;">
                 </div>
                 <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">
                   No SFD image uploaded yet.
@@ -1967,6 +1967,14 @@ draw_compare_pies(b,f){
       #sfd_export_area > .chart_container{
         min-width:0;
         width:100%;
+        overflow:hidden;
+        box-sizing:border-box;
+      }
+      #sfd_export_area .chart_container table.legend{
+        width:100% !important;
+      }
+      #sfd_export_area .chart_container img{
+        max-width:100% !important;
       }
       @media (max-width: 900px){
         #sfd_export_area{
