@@ -37,6 +37,10 @@ let summary_ghg=new Vue({
     compare_b:null,
     compare_f:null,
     compare_error:"",
+    compare_total_baseline:0,
+    compare_total_future:0,
+    compare_total_diff:0,
+    compare_total_pct:null,
 
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
@@ -796,6 +800,38 @@ generate_compare_from_uploads(){
     console.warn(e);
     this.compare_error = "Could not generate comparison from the uploaded JSON files.";
   }
+},
+
+
+compare_bar_max(){
+  return Math.max(
+    Number(this.compare_total_baseline||0),
+    Number(this.compare_total_future||0),
+    1
+  );
+},
+
+compare_bar_width(value){
+  const max = this.compare_bar_max();
+  const v = Number(value||0);
+  return Math.max(0, Math.min(100, (v/max)*100));
+},
+
+compare_change_text(){
+  const d = Number(this.compare_total_diff||0);
+  const p = this.compare_total_pct;
+  if(!this.compare_rows || !this.compare_rows.length) return "";
+  if(d===0) return "No change";
+  const dir = d < 0 ? "Reduction" : "Increase";
+  const pct = (p===null || isNaN(p)) ? "" : " (" + format(Math.abs(p),1,1) + "%)";
+  return dir + ": " + this.format_emission(Math.abs(d)) + " (" + this.current_unit_ghg + ")" + pct;
+},
+
+compare_change_color(){
+  const d = Number(this.compare_total_diff||0);
+  if(d < 0) return "#2e7d32";
+  if(d > 0) return "#c62828";
+  return "#666";
 },
 
 draw_simple_pie(elId, items){
@@ -1859,7 +1895,42 @@ draw_compare_pies(b,f){
         </tr>
       </table>
 
-      
+      <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:stretch;">
+        <div style="border:1px solid #eee; padding:1em;">
+          <div style="font-weight:700; margin-bottom:.75em;">Change summary</div>
+          <div style="display:grid; grid-template-columns:42% 58%; row-gap:.75em; column-gap:1em; align-items:center;">
+            <div>Total change</div>
+            <div :style="{fontWeight:'700', color:compare_change_color()}">{{ compare_change_text() || '-' }}</div>
+            <div>Offsite change</div>
+            <div>{{ get_compare_rows_offsite().length ? ((get_compare_rows_offsite()[3] && get_compare_rows_offsite()[3].pct!==null) ? format(get_compare_rows_offsite()[3].pct,1,1)+'%' : '-') : '-' }}</div>
+            <div>Onsite change</div>
+            <div>{{ get_compare_rows_onsite().length ? ((get_compare_rows_onsite()[4] && get_compare_rows_onsite()[4].pct!==null) ? format(get_compare_rows_onsite()[4].pct,1,1)+'%' : '-') : '-' }}</div>
+          </div>
+        </div>
+
+        <div style="border:1px solid #eee; padding:1em;">
+          <div style="font-weight:700; margin-bottom:.75em;">Total emissions comparison</div>
+          <div style="display:grid; grid-template-columns:110px 1fr auto; gap:.6em .75em; align-items:center;">
+            <div>Baseline</div>
+            <div style="background:#eef2f7; border-radius:4px; height:20px; overflow:hidden;">
+              <div :style="{width: compare_bar_width(compare_total_baseline)+'%', height:'100%', background:'#4f81bd'}"></div>
+            </div>
+            <div><b>{{format_emission(compare_total_baseline)}}</b> ({{current_unit_ghg}})</div>
+
+            <div>Future</div>
+            <div style="background:#eef2f7; border-radius:4px; height:20px; overflow:hidden;">
+              <div :style="{width: compare_bar_width(compare_total_future)+'%', height:'100%', background:'#9bbb59'}"></div>
+            </div>
+            <div><b>{{format_emission(compare_total_future)}}</b> ({{current_unit_ghg}})</div>
+          </div>
+
+          <div style="margin-top:.9em; padding-top:.75em; border-top:1px solid #eee; color:#444;">
+            <b>&#916;</b> {{format_emission(compare_total_diff)}} ({{current_unit_ghg}})
+            <span v-if="compare_total_pct!==null"> / {{format(compare_total_pct,1,1)}}%</span>
+          </div>
+        </div>
+      </div>
+
 <div class="compare-scenario-grid" style="margin-top:1.25em;">
   <div style="border:1px solid #eee; padding:1em;">
     <div style="font-weight:700; margin-bottom:.75em;">Baseline scenario</div>
