@@ -1697,7 +1697,7 @@ draw_compare_pies(b,f){
               <div class="chart_title">SFD graphic</div>
               <div style="margin-top:1em;">
                 <div v-if="sfd_image_dataurl">
-                  <img :src="sfd_image_dataurl" style="max-width:100%; height:auto; display:block; margin:0 auto; border:1px solid #ddd;">
+                  <img :src="sfd_image_dataurl" style="width:100%; max-width:100%; height:auto; display:block; margin:0 auto; border:1px solid #ddd; object-fit:contain;">
                 </div>
                 <div v-else style="color:#888; padding:1em; border:1px dashed #ccc;">
                   No SFD image uploaded yet.
@@ -1790,9 +1790,10 @@ draw_compare_pies(b,f){
       </table>
 
       
-<div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:start;">
+<div class="compare-scenario-grid" style="margin-top:1.25em;">
   <div style="border:1px solid #eee; padding:1em;">
     <div style="font-weight:700; margin-bottom:.75em;">Baseline scenario</div>
+    <div style="color:var(--color-level-generic); font-size:large; font-weight:bold; margin-bottom:.75em;">Emissions summary</div>
 
     <div v-if="compare_baseline_emissions()">
       <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
@@ -1828,6 +1829,7 @@ draw_compare_pies(b,f){
 
   <div style="border:1px solid #eee; padding:1em;">
     <div style="font-weight:700; margin-bottom:.75em;">Future scenario (2040)</div>
+    <div style="color:var(--color-level-generic); font-size:large; font-weight:bold; margin-bottom:.75em;">Emissions summary</div>
 
     <div v-if="compare_future_emissions()">
       <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
@@ -1955,6 +1957,34 @@ draw_compare_pies(b,f){
       #summary_ghg div.chart_container table.legend {
         width:38%;
       }
+      #sfd_export_area{
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+        gap:1em;
+        align-items:start;
+        width:100%;
+      }
+      #sfd_export_area > .chart_container{
+        min-width:0;
+        width:100%;
+      }
+      @media (max-width: 900px){
+        #sfd_export_area{
+          grid-template-columns:1fr !important;
+        }
+      }
+      .compare-scenario-grid{
+        display:grid;
+        grid-template-columns:50% 50%;
+        gap:1em;
+        align-items:start;
+      }
+      @media (max-width: 900px){
+        .compare-scenario-grid{
+          grid-template-columns:1fr;
+        }
+      }
+
 
       #summary_ghg div.chart_container div.bar_background {
         background:#dadada;
