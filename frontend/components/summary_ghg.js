@@ -1705,6 +1705,7 @@ draw_compare_pies(b,f){
               </div>
             </div>
           </div>
+        </div>
 
 <div v-if="current_view=='sfd_compare'">
   <div class="chart_container" style="margin-top:1em;">
