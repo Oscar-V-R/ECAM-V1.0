@@ -41,7 +41,7 @@ let summary_ghg=new Vue({
     compare_total_future:0,
     compare_total_diff:0,
     compare_total_pct:null,
-    compare_export_mode:"full",
+    compare_export_mode:"summary",
 
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
@@ -420,14 +420,17 @@ on_sfd_file_change(ev){
         await this.ensure_html2canvas();
 
         const map = {
-          full: "compare_export_full",
           summary: "compare_export_summary",
+          table: "compare_export_table",
           baseline: "compare_export_baseline",
           future: "compare_export_future",
+          baseline_sfd: "compare_export_baseline_sfd",
+          future_sfd: "compare_export_future_sfd",
+          sfd_pair: "compare_export_sfd_pair",
         };
 
-        const mode = String(this.compare_export_mode || "full");
-        const targetId = map[mode] || "compare_export_full";
+        const mode = String(this.compare_export_mode || "summary");
+        const targetId = map[mode] || "compare_export_summary";
         const el = document.getElementById(targetId);
 
         if(!el){
@@ -1917,10 +1920,13 @@ draw_compare_pies(b,f){
     <div v-if="compare_rows && compare_rows.length" style="display:flex; gap:.5em; justify-content:flex-end; align-items:center; margin-top:.75em; flex-wrap:wrap;">
       <label for="compare_export_mode" style="font-weight:600;">Export section</label>
       <select id="compare_export_mode" v-model="compare_export_mode" style="padding:.35em .5em; border:1px solid #ccc; border-radius:4px; min-width:220px;">
-        <option value="full">Full comparison</option>
         <option value="summary">Comparison summary</option>
+        <option value="table">Comparison table</option>
         <option value="baseline">Baseline scenario</option>
         <option value="future">Future scenario</option>
+        <option value="baseline_sfd">Baseline SFD</option>
+        <option value="future_sfd">Future SFD</option>
+        <option value="sfd_pair">SFD pair</option>
       </select>
       <button type="button" @click.prevent="download_compare_jpg()">Download JPG</button>
     </div>
@@ -1930,7 +1936,7 @@ draw_compare_pies(b,f){
     </div>
 
     <div v-if="compare_rows && compare_rows.length" id="compare_export_full" style="margin-top:1.25em;">
-      <div id="compare_export_summary">
+      <div id="compare_export_table">
       <div style="font-weight:700; color:var(--color-level-generic); margin-bottom:.5em;">Comparison table</div>
       <table class="legend" style="width:100%;">
         <tr style="font-weight:700;">
@@ -1967,8 +1973,9 @@ draw_compare_pies(b,f){
           <td style="text-align:right; padding-top:.9em;">{{ compare_total_pct===null ? "-" : format(compare_total_pct,1,1)+'%' }}</td>
         </tr>
       </table>
+      </div>
 
-      <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:stretch;">
+      <div id="compare_export_summary" style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:stretch;">
         <div style="border:1px solid #eee; padding:1em;">
           <div style="font-weight:700; margin-bottom:.75em;">Change summary</div>
           <div style="display:grid; grid-template-columns:42% 58%; row-gap:.75em; column-gap:1em; align-items:center;">
@@ -2080,12 +2087,12 @@ draw_compare_pies(b,f){
   </div>
 </div>
 
-<div v-if="compare_baseline_sfd || compare_future_sfd" style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:start;">
-        <div>
+<div id="compare_export_sfd_pair" v-if="compare_baseline_sfd || compare_future_sfd" style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:start;">
+        <div id="compare_export_baseline_sfd">
           <div style="font-weight:700; margin-bottom:.5em;">Baseline SFD</div>
           <div v-if="compare_baseline_sfd"><img :src="compare_baseline_sfd" style="max-width:100%; height:auto; border:1px solid #ddd;"></div>
         </div>
-        <div>
+        <div id="compare_export_future_sfd">
           <div style="font-weight:700; margin-bottom:.5em;">Future SFD</div>
           <div v-if="compare_future_sfd"><img :src="compare_future_sfd" style="max-width:100%; height:auto; border:1px solid #ddd;"></div>
         </div>
