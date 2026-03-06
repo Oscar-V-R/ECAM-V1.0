@@ -304,17 +304,6 @@ let summary_ghg=new Vue({
       return {diff, pct};
     },
 
-    compare_pct_change(a,b){
-      const da = Number(a||0), db = Number(b||0);
-      if(!da) return null;
-      return 100*(db-da)/da;
-    },
-
-    compare_bar_width(v){
-      const maxv = Math.max(Number(this.compare_total_baseline||0), Number(this.compare_total_future||0), 1);
-      return (100*Number(v||0)/maxv).toFixed(1) + '%';
-    },
-
 on_sfd_file_change(ev){
       const file = ev && ev.target && ev.target.files ? ev.target && ev.target.files ? ev.target.files[0] : null : null;
       if(!file) return;
@@ -607,125 +596,159 @@ get_compare_rows_onsite(){
   return (this.compare_rows||[]).filter(r=>r.section==='onsite');
 },
 
-// Traverse JSON and try to find values for ECAM components (parsed JSON + raw JSON text)
+// Read the uploaded ECAM JSON using the same wastewater components used in the SFD tab.
+// For exported ECAM JSON, KPI functions are not present, so we rebuild the same component groups from JSON fields.
 extract_ecam_components_from_json(root, rawText){
-  const toNum = (v)=>{
-    if(typeof v === 'number' && isFinite(v)) return v;
-    if(typeof v === 'string'){
-      const n = Number(String(v).replace(/,/g,''));
-      return isFinite(n) ? n : null;
-    }
-    return null;
+  const normalize = (r)=> Array.isArray(r) ? (r[0] || {}) : (r || {});
+  const data = normalize(root);
+  const out = {
+    offsite_collection:0,
+    offsite_transport:0,
+    offsite_treatment:0,
+    onsite_containment:0,
+    onsite_emptying:0,
+    onsite_treatment:0,
+    onsite_discharge:0,
+    total_offsite:0,
+    total_onsite:0,
+    total:0,
   };
 
-  const sumAllNumbers = (node)=>{
-    if(node===null || node===undefined) return 0;
-    const direct = toNum(node);
-    if(direct!==null) return direct;
-    if(Array.isArray(node)) return node.reduce((s,x)=>s+sumAllNumbers(x),0);
-    if(typeof node === 'object') return Object.keys(node).reduce((s,k)=>s+sumAllNumbers(node[k]),0);
+  const n = (v)=>{ const x = Number(v); return isFinite(x) ? x : 0; };
+  const ch4ToCO2eq = (bodKg, ef)=> n(bodKg) * n(ef) * (16/12) * 25;
+  const n2oToCO2eq = (tnKg, ef)=> n(tnKg) * n(ef) * (44/28) * 298;
+
+  // Preferred path: exported ECAM assessment JSON structure.
+  if(data && data.Waste){
+    const W = data.Waste || {};
+    const collections = Array.isArray(W.Collection) ? W.Collection : [];
+    const treatments  = Array.isArray(W.Treatment)  ? W.Treatment  : [];
+    const onsites     = Array.isArray(W.Onsite)     ? W.Onsite     : [];
+
+    // OFFSITE SANITATION
+    out.offsite_collection = collections.map(s => {
+      // Same grouping as SFD tab: collection bucket. For uploaded JSON, the live KPI is best approximated by
+      // untreated/CSo emissions plus any electrical emissions if ever included later.
+      return (
+        ch4ToCO2eq(s.wwc_bod, s.wwc_ch4_efac_cso) +
+        n2oToCO2eq(s.wwc_tn,  s.wwc_n2o_efac_cso)
+      );
+    }).reduce((a,b)=>a+b,0);
+
+    out.offsite_transport = collections.map(s => {
+      // If there is transport fuel in JSON, it belongs here. Current uploaded file has zero.
+      return 0;
+    }).reduce((a,b)=>a+b,0);
+
+    out.offsite_treatment = treatments.map(s => {
+      return (
+        ch4ToCO2eq(s.wwt_bod_infl, s.wwt_ch4_efac_tre) +
+        n2oToCO2eq(s.wwt_tn_infl,  s.wwt_n2o_efac_tre) +
+        ch4ToCO2eq(s.wwt_bod_effl, s.wwt_ch4_efac_dis) +
+        n2oToCO2eq(s.wwt_tn_effl,  s.wwt_n2o_efac_dis)
+      );
+    }).reduce((a,b)=>a+b,0);
+
+    // ONSITE SANITATION
+    out.onsite_containment = onsites.map(s => {
+      return ch4ToCO2eq(s.wwo_bod_cont, s.wwo_ch4_efac_con);
+    }).reduce((a,b)=>a+b,0);
+
+    out.onsite_emptying = onsites.map(s => {
+      return 0;
+    }).reduce((a,b)=>a+b,0);
+
+    out.onsite_treatment = onsites.map(s => {
+      return (
+        ch4ToCO2eq(s.wwo_bod_infl, s.wwo_ch4_efac_tre) +
+        n2oToCO2eq(s.wwo_tn_infl,  s.wwo_n2o_efac_tre)
+      );
+    }).reduce((a,b)=>a+b,0);
+
+    out.onsite_discharge = onsites.map(s => {
+      return (
+        ch4ToCO2eq(s.wwo_bod_effl, s.wwo_ch4_efac_dis) +
+        n2oToCO2eq(s.wwo_tn_effl,  s.wwo_n2o_efac_dis) +
+        n2oToCO2eq(s.wwo_opd_tn,   s.wwo_n2o_efac_opd)
+      );
+    }).reduce((a,b)=>a+b,0);
+
+    out.total_offsite = out.offsite_collection + out.offsite_transport + out.offsite_treatment;
+    out.total_onsite  = out.onsite_containment + out.onsite_emptying + out.onsite_treatment + out.onsite_discharge;
+    out.total         = out.total_offsite + out.total_onsite;
+    return out;
+  }
+
+  // Fallback: generic flat search for alternative JSON shapes.
+  const targets = {
+    offsite_collection: ["offsite_collection","collection_offsite","offsite collection","collection (offsite)","collection"],
+    offsite_transport : ["offsite_transport","transport_offsite","offsite transport","transport (offsite)","transport"],
+    offsite_treatment : ["offsite_treatment","treatment_offsite","offsite treatment","treatment (offsite)","treatment"],
+    onsite_containment: ["onsite_containment","containment_onsite","onsite containment","containment (onsite)","containment"],
+    onsite_emptying   : ["onsite_emptying","emptying_onsite","onsite emptying","emptying (onsite)","emptying"],
+    onsite_treatment  : ["onsite_treatment","treatment_onsite","onsite treatment","treatment (onsite)","treatment"],
+    onsite_discharge  : ["onsite_discharge","discharge_onsite","onsite discharge","discharge (onsite)","discharge"],
+  };
+  const flat = [];
+  const pushFlat = (k, v, path, label)=>{
+    const num = (typeof v === "number") ? v : (typeof v === "string" ? Number(v) : NaN);
+    if(!isFinite(num)) return;
+    flat.push({k:String(k||""), label:String(label||""), path:String(path||""), v:num});
+  };
+  const walk = (node, path)=>{
+    if(node===null || node===undefined) return;
+    if(Array.isArray(node)){
+      for(let i=0;i<node.length;i++) walk(node[i], path+"["+i+"]");
+      return;
+    }
+    if(typeof node === "object"){
+      const hasValue = Object.prototype.hasOwnProperty.call(node,"value");
+      const hasLabel = Object.prototype.hasOwnProperty.call(node,"label") || Object.prototype.hasOwnProperty.call(node,"name") || Object.prototype.hasOwnProperty.call(node,"title");
+      if(hasValue && hasLabel) pushFlat("label_value", node.value, path, (node.label || node.name || node.title || ""));
+      for(const key in node){
+        if(!Object.prototype.hasOwnProperty.call(node,key)) continue;
+        const val = node[key];
+        pushFlat(key, val, path+"."+key, "");
+        walk(val, path+"."+key);
+      }
+    }
+  };
+  walk(root, "$");
+  const score = (item, needOffsite, needOnsite, kw)=>{
+    const s = (item.k+" "+item.label+" "+item.path).toLowerCase();
+    let sc = 0;
+    if(kw && s.includes(kw)) sc += 5;
+    if(needOffsite && (s.includes("offsite") || s.includes("off-site"))) sc += 3;
+    if(needOnsite  && (s.includes("onsite")  || s.includes("on-site"))) sc += 3;
+    return sc;
+  };
+  const pick = (aliases, needOffsite, needOnsite)=>{
+    let best = null, bestScore = -1;
+    for(const a of aliases){
+      const kw = String(a).toLowerCase();
+      for(const item of flat){
+        const sc = score(item, needOffsite, needOnsite, kw);
+        if(sc > bestScore){ bestScore = sc; best = item; }
+      }
+    }
+    if(best && bestScore >= 5) return best.v;
+    for(const item of flat){
+      const key = item.k.toLowerCase();
+      for(const a of aliases){ if(key === String(a).toLowerCase()) return item.v; }
+    }
     return 0;
   };
-
-  const sumKpi = (node, kpiName)=>{
-    let total = 0;
-    const walk = (n)=>{
-      if(n===null || n===undefined) return;
-      if(Array.isArray(n)){
-        n.forEach(walk);
-        return;
-      }
-      if(typeof n !== 'object') return;
-
-      for(const key in n){
-        if(!Object.prototype.hasOwnProperty.call(n,key)) continue;
-        const val = n[key];
-        if(key === kpiName){
-          if(typeof val === 'number') total += val;
-          else if(val && typeof val === 'object'){
-            const t = toNum(val.total);
-            const v = toNum(val.value);
-            const r = toNum(val.result);
-            if(t!==null) total += t;
-            else if(v!==null) total += v;
-            else if(r!==null) total += r;
-            else total += sumAllNumbers(val);
-          }
-        }
-
-        if(val && typeof val === 'object'){
-          const id  = String(val.id||val.key||val.code||val.name||val.label||'');
-          if(id === kpiName){
-            const t = toNum(val.total);
-            const v = toNum(val.value);
-            const r = toNum(val.result);
-            if(t!==null) total += t;
-            else if(v!==null) total += v;
-            else if(r!==null) total += r;
-            else total += sumAllNumbers(val);
-          }
-        }
-        walk(val);
-      }
-    };
-    walk(node);
-
-    if(total===0 && rawText){
-      try{
-        const esc = kpiName.replace(/[-\/\^$*+?.()|[\]{}]/g, '\\$&');
-        const patterns = [
-          new RegExp('"'+esc+'"\s*:\s*\{[^{}]{0,200}?"total"\s*:\s*([0-9eE+\-.,]+)','g'),
-          new RegExp('"'+esc+'"\s*:\s*\{[^{}]{0,200}?"value"\s*:\s*([0-9eE+\-.,]+)','g'),
-          new RegExp('"'+esc+'"\s*:\s*([0-9eE+\-.,]+)','g')
-        ];
-        for(const re of patterns){
-          let m;
-          while((m = re.exec(rawText))!==null){
-            const n = Number(String(m[1]).replace(/,/g,''));
-            if(isFinite(n)) total += n;
-          }
-          if(total!==0) break;
-        }
-      }catch(e){}
-    }
-    return Number(total||0);
-  };
-
-  const found = {};
-  found.offsite_collection =
-    sumKpi(root,'wwc_KPI_GHG_col') +
-    sumKpi(root,'wwc_KPI_GHG_cso') +
-    sumKpi(root,'wwc_KPI_GHG_elec');
-
-  found.offsite_transport =
-    sumKpi(root,'wwc_KPI_GHG_fuel');
-
-  found.offsite_treatment =
-    sumKpi(root,'wwt_KPI_GHG') +
-    sumKpi(root,'wwt_KPI_GHG_elec') +
-    sumKpi(root,'wwt_KPI_GHG_fuel');
-
-  found.onsite_containment =
-    sumKpi(root,'wwo_KPI_GHG_containment');
-
-  found.onsite_emptying =
-    sumKpi(root,'wwo_KPI_GHG_trck') +
-    sumKpi(root,'wwo_KPI_GHG_fuel');
-
-  found.onsite_treatment =
-    sumKpi(root,'wwo_KPI_GHG_tre') +
-    sumKpi(root,'wwo_KPI_GHG_biog') +
-    sumKpi(root,'wwo_KPI_GHG_dig_fuel');
-
-  found.onsite_discharge =
-    sumKpi(root,'wwo_KPI_GHG_dis') +
-    sumKpi(root,'wwo_KPI_GHG_unt_opd');
-
-  found.total_offsite = found.offsite_collection + found.offsite_transport + found.offsite_treatment;
-  found.total_onsite  = found.onsite_containment + found.onsite_emptying + found.onsite_treatment + found.onsite_discharge;
-  found.total         = found.total_offsite + found.total_onsite;
-
-  return found;
+  out.offsite_collection = pick(targets.offsite_collection, true, false);
+  out.offsite_transport  = pick(targets.offsite_transport,  true, false);
+  out.offsite_treatment  = pick(targets.offsite_treatment,  true, false);
+  out.onsite_containment = pick(targets.onsite_containment, false, true);
+  out.onsite_emptying    = pick(targets.onsite_emptying,    false, true);
+  out.onsite_treatment   = pick(targets.onsite_treatment,   false, true);
+  out.onsite_discharge   = pick(targets.onsite_discharge,   false, true);
+  out.total_offsite = out.offsite_collection + out.offsite_transport + out.offsite_treatment;
+  out.total_onsite  = out.onsite_containment + out.onsite_emptying + out.onsite_treatment + out.onsite_discharge;
+  out.total         = out.total_offsite + out.total_onsite;
+  return out;
 },
 
 generate_compare_from_uploads(){
@@ -1836,41 +1859,7 @@ draw_compare_pies(b,f){
         </tr>
       </table>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1em; margin-top:1.25em;">
-        <div style="border:1px solid #eee; padding:1em;">
-          <div style="font-weight:700; margin-bottom:.5em;">Change summary</div>
-          <table class="legend" style="width:100%;">
-            <tr>
-              <td>Total change</td>
-              <td style="text-align:right;">{{ compare_total_pct===null ? '-' : format(compare_total_pct,1,1)+'%' }}</td>
-            </tr>
-            <tr>
-              <td>Offsite change</td>
-              <td style="text-align:right;">{{ (!compare_b || !compare_f) ? '-' : (compare_pct_change(compare_b.total_offsite, compare_f.total_offsite)===null ? '-' : format(compare_pct_change(compare_b.total_offsite, compare_f.total_offsite),1,1)+'%') }}</td>
-            </tr>
-            <tr>
-              <td>Onsite change</td>
-              <td style="text-align:right;">{{ (!compare_b || !compare_f) ? '-' : (compare_pct_change(compare_b.total_onsite, compare_f.total_onsite)===null ? '-' : format(compare_pct_change(compare_b.total_onsite, compare_f.total_onsite),1,1)+'%') }}</td>
-            </tr>
-          </table>
-        </div>
-
-        <div style="border:1px solid #eee; padding:1em;">
-          <div style="font-weight:700; margin-bottom:.5em;">Total emissions comparison</div>
-          <div style="display:grid; grid-template-columns:100px 1fr auto; gap:.5em; align-items:center; margin:.4em 0;">
-            <div>Baseline</div>
-            <div style="background:#eef3f8; height:18px; border-radius:4px; overflow:hidden;"><div :style="{width: compare_bar_width(compare_total_baseline), background:'#4f81bd', height:'100%'}"></div></div>
-            <div><b>{{format_emission(compare_total_baseline)}}</b> ({{current_unit_ghg}})</div>
-          </div>
-          <div style="display:grid; grid-template-columns:100px 1fr auto; gap:.5em; align-items:center; margin:.4em 0;">
-            <div>Future</div>
-            <div style="background:#eef3f8; height:18px; border-radius:4px; overflow:hidden;"><div :style="{width: compare_bar_width(compare_total_future), background:'#9bbb59', height:'100%'}"></div></div>
-            <div><b>{{format_emission(compare_total_future)}}</b> ({{current_unit_ghg}})</div>
-          </div>
-          <div style="margin-top:.5em; color:#666;">Δ {{format_emission(compare_total_diff)}} ({{current_unit_ghg}})</div>
-        </div>
-      </div>
-
+      
 <div class="compare-scenario-grid" style="margin-top:1.25em;">
   <div style="border:1px solid #eee; padding:1em;">
     <div style="font-weight:700; margin-bottom:.75em;">Baseline scenario</div>
