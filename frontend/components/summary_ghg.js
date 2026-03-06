@@ -32,6 +32,8 @@ let summary_ghg=new Vue({
     compare_baseline_sfd:null,
     compare_future_sfd:null,
     compare_rows:null,
+    compare_b:null,
+    compare_f:null,
     compare_error:"",
 
     //current emissions unit
@@ -407,6 +409,47 @@ on_sfd_file_change(ev){
     }
 ,
 
+
+compare_baseline_emissions(){
+  const b = this.compare_b;
+  if(!b) return null;
+  return {
+    offsite:{
+      Collection: Number(b.offsite_collection||0),
+      Transport:  Number(b.offsite_transport||0),
+      Treatment:  Number(b.offsite_treatment||0),
+      total:      Number(b.total_offsite||0),
+    },
+    onsite:{
+      Containment: Number(b.onsite_containment||0),
+      Emptying:    Number(b.onsite_emptying||0),
+      Treatment:   Number(b.onsite_treatment||0),
+      Discharge:   Number(b.onsite_discharge||0),
+      total:       Number(b.total_onsite||0),
+    }
+  };
+},
+
+compare_future_emissions(){
+  const f = this.compare_f;
+  if(!f) return null;
+  return {
+    offsite:{
+      Collection: Number(f.offsite_collection||0),
+      Transport:  Number(f.offsite_transport||0),
+      Treatment:  Number(f.offsite_treatment||0),
+      total:      Number(f.total_offsite||0),
+    },
+    onsite:{
+      Containment: Number(f.onsite_containment||0),
+      Emptying:    Number(f.onsite_emptying||0),
+      Treatment:   Number(f.onsite_treatment||0),
+      Discharge:   Number(f.onsite_discharge||0),
+      total:       Number(f.total_onsite||0),
+    }
+  };
+},
+
 get_sfd_emissions(){
       const zeros = {
         offsite:{ Collection:0, Transport:0, Treatment:0, total:0 },
@@ -522,6 +565,8 @@ clear_compare_uploads(){
   this.compare_baseline_sfd = null;
   this.compare_future_sfd = null;
   this.compare_rows = null;
+  this.compare_b = null;
+  this.compare_f = null;
   this.compare_error = "";
   this.compare_total_baseline = 0;
   this.compare_total_future = 0;
@@ -653,6 +698,9 @@ generate_compare_from_uploads(){
     const b = this.extract_ecam_components_from_json(this.compare_baseline_json);
     const f = this.extract_ecam_components_from_json(this.compare_future_json);
 
+    this.compare_b = b;
+    this.compare_f = f;
+
     const rows = [
       {section:"offsite", key:"collection", label:"Collection", baseline:b.offsite_collection, future:f.offsite_collection},
       {section:"offsite", key:"transport",  label:"Transport",  baseline:b.offsite_transport,  future:f.offsite_transport},
@@ -738,11 +786,24 @@ draw_compare_pies(b,f){
 
     const pct = (v, tot) => (tot>0 ? (100*Number(v||0)/tot) : 0);
 
+    const hideLegend = (id)=>{
+      try{
+        const el=document.getElementById(id);
+        if(!el) return;
+        const leg=el.querySelector("table.legend");
+        if(leg) leg.style.display="none";
+      }catch(e){}
+    };
+
     const b_off_tot = Number(b.offsite_collection||0)+Number(b.offsite_transport||0)+Number(b.offsite_treatment||0);
     const b_on_tot  = Number(b.onsite_containment||0)+Number(b.onsite_emptying||0)+Number(b.onsite_treatment||0)+Number(b.onsite_discharge||0);
 
     const f_off_tot = Number(f.offsite_collection||0)+Number(f.offsite_transport||0)+Number(f.offsite_treatment||0);
     const f_on_tot  = Number(f.onsite_containment||0)+Number(f.onsite_emptying||0)+Number(f.onsite_treatment||0)+Number(f.onsite_discharge||0);
+    hideLegend("chart_compare_baseline_offsite");
+    hideLegend("chart_compare_baseline_onsite");
+    hideLegend("chart_compare_future_offsite");
+    hideLegend("chart_compare_future_onsite");
 
     // Offsite (Baseline)
     Charts.draw_pie_chart(
@@ -754,6 +815,8 @@ draw_compare_pies(b,f){
       ],
       ["#4f81bd", "#f79646", "#9bbb59"],
     );
+    hideLegend("chart_compare_baseline_offsite");
+
 
     // Onsite (Baseline)
     Charts.draw_pie_chart(
@@ -766,6 +829,8 @@ draw_compare_pies(b,f){
       ],
       ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"],
     );
+    hideLegend("chart_compare_baseline_onsite");
+
 
     // Offsite (Future)
     Charts.draw_pie_chart(
@@ -777,6 +842,8 @@ draw_compare_pies(b,f){
       ],
       ["#4f81bd", "#f79646", "#9bbb59"],
     );
+    hideLegend("chart_compare_future_offsite");
+
 
     // Onsite (Future)
     Charts.draw_pie_chart(
@@ -789,6 +856,8 @@ draw_compare_pies(b,f){
       ],
       ["#4f81bd", "#f79646", "#9bbb59", "#c9c9c9"],
     );
+    hideLegend("chart_compare_future_onsite");
+
   }catch(e){
     // never break Results
     console.warn(e);
@@ -1721,24 +1790,80 @@ draw_compare_pies(b,f){
         </tr>
       </table>
 
-      <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:start;">
-        <div style="border:1px solid #eee; padding:1em;">
-          <div style="font-weight:700; margin-bottom:.5em;">Baseline pie charts</div>
-          <div style="display:grid; grid-template-columns:50% 50%; gap:1em;">
-            <div><div id="chart_compare_baseline_offsite"></div></div>
-            <div><div id="chart_compare_baseline_onsite"></div></div>
-          </div>
+      
+<div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:start;">
+  <div style="border:1px solid #eee; padding:1em;">
+    <div style="font-weight:700; margin-bottom:.75em;">Baseline scenario</div>
+
+    <div v-if="compare_baseline_emissions()">
+      <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
+        <div>
+          <b>OFFSITE SANITATION</b>
+          <table class="legend" style="width:100%; margin-top:.35em;">
+            <tr><td>Collection</td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().offsite.Collection)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Transport</td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().offsite.Transport)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().offsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td><b>Total</b></td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().offsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
+          </table>
         </div>
-        <div style="border:1px solid #eee; padding:1em;">
-          <div style="font-weight:700; margin-bottom:.5em;">Future pie charts</div>
-          <div style="display:grid; grid-template-columns:50% 50%; gap:1em;">
-            <div><div id="chart_compare_future_offsite"></div></div>
-            <div><div id="chart_compare_future_onsite"></div></div>
-          </div>
-        </div>
+        <div><div id="chart_compare_baseline_offsite"></div></div>
       </div>
 
-      <div v-if="compare_baseline_sfd || compare_future_sfd" style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:start;">
+      <hr style="border-color:#eee; margin:1.2em 0;">
+
+      <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
+        <div>
+          <b>ONSITE SANITATION</b>
+          <table class="legend" style="width:100%; margin-top:.35em;">
+            <tr><td>Containment</td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().onsite.Containment)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Emptying</td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().onsite.Emptying)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().onsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Discharge</td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().onsite.Discharge)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td><b>Total</b></td><td style="text-align:right;"><b>{{format_emission(compare_baseline_emissions().onsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
+          </table>
+        </div>
+        <div><div id="chart_compare_baseline_onsite"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="border:1px solid #eee; padding:1em;">
+    <div style="font-weight:700; margin-bottom:.75em;">Future scenario (2040)</div>
+
+    <div v-if="compare_future_emissions()">
+      <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
+        <div>
+          <b>OFFSITE SANITATION</b>
+          <table class="legend" style="width:100%; margin-top:.35em;">
+            <tr><td>Collection</td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().offsite.Collection)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Transport</td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().offsite.Transport)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().offsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td><b>Total</b></td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().offsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
+          </table>
+        </div>
+        <div><div id="chart_compare_future_offsite"></div></div>
+      </div>
+
+      <hr style="border-color:#eee; margin:1.2em 0;">
+
+      <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center;">
+        <div>
+          <b>ONSITE SANITATION</b>
+          <table class="legend" style="width:100%; margin-top:.35em;">
+            <tr><td>Containment</td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().onsite.Containment)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Emptying</td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().onsite.Emptying)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Treatment</td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().onsite.Treatment)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td>Discharge</td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().onsite.Discharge)}}</b> ({{current_unit_ghg}})</td></tr>
+            <tr><td><b>Total</b></td><td style="text-align:right;"><b>{{format_emission(compare_future_emissions().onsite.total)}}</b> ({{current_unit_ghg}})</td></tr>
+          </table>
+        </div>
+        <div><div id="chart_compare_future_onsite"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div v-if="compare_baseline_sfd || compare_future_sfd" style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1.25em; align-items:start;">
         <div>
           <div style="font-weight:700; margin-bottom:.5em;">Baseline SFD</div>
           <div v-if="compare_baseline_sfd"><img :src="compare_baseline_sfd" style="max-width:100%; height:auto; border:1px solid #ddd;"></div>
