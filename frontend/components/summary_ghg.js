@@ -1659,8 +1659,8 @@ draw_compare_pies(b,f){
             </div>
           </div>
 
-<div id="sfd_export_area" style="display:grid; grid-template-columns:50% 50%; gap:1em; align-items:start;">
-            <div class="chart_container">
+<div id="sfd_export_area" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1em; align-items:start; width:100%;">
+            <div class="chart_container" style="min-width:0;">
               <div class="chart_title">Emissions summary</div>
 
               <div style="display:grid; grid-template-columns:55% 45%; gap:1em; align-items:center; margin-top:1em;">
@@ -1691,10 +1691,9 @@ draw_compare_pies(b,f){
                 </div>
                 <div><div id="chart_sfd_onsite"></div></div>
               </div>
-              </div>
             </div>
 
-            <div class="chart_container">
+            <div class="chart_container" style="min-width:0;">
               <div class="chart_title">SFD graphic</div>
               <div style="margin-top:1em;">
                 <div v-if="sfd_image_dataurl">
