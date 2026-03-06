@@ -598,111 +598,29 @@ get_compare_rows_onsite(){
 
 // Traverse JSON and try to find values for ECAM components (parsed JSON + raw JSON text)
 extract_ecam_components_from_json(root, rawText){
-  const found = {
-    offsite_collection:0,
-    offsite_transport:0,
-    offsite_treatment:0,
-    onsite_containment:0,
-    onsite_emptying:0,
-    onsite_treatment:0,
-    onsite_discharge:0,
+  const targets = {
+    offsite_collection: ["offsite_collection","collection_offsite","offsite collection","collection (offsite)","collection"],
+    offsite_transport : ["offsite_transport","transport_offsite","offsite transport","transport (offsite)","transport"],
+    offsite_treatment : ["offsite_treatment","treatment_offsite","offsite treatment","treatment (offsite)","treatment"],
+    onsite_containment: ["onsite_containment","containment_onsite","onsite containment","containment (onsite)","containment"],
+    onsite_emptying   : ["onsite_emptying","emptying_onsite","onsite emptying","emptying (onsite)","emptying"],
+    onsite_treatment  : ["onsite_treatment","treatment_onsite","onsite treatment","treatment (onsite)","treatment"],
+    onsite_discharge  : ["onsite_discharge","discharge_onsite","onsite discharge","discharge (onsite)","discharge"],
   };
 
-  const exactGroups = {
-    offsite_collection: ["wwc_KPI_GHG_col","wwc_KPI_GHG_cso","wwc_KPI_GHG_elec"],
-    offsite_transport : ["wwc_KPI_GHG_fuel"],
-    offsite_treatment : ["wwt_KPI_GHG","wwt_KPI_GHG_elec","wwt_KPI_GHG_fuel"],
-    onsite_containment: ["wwo_KPI_GHG_containment"],
-    onsite_emptying   : ["wwo_KPI_GHG_trck","wwo_KPI_GHG_fuel"],
-    onsite_treatment  : ["wwo_KPI_GHG_tre","wwo_KPI_GHG_biog","wwo_KPI_GHG_dig_fuel"],
-    onsite_discharge  : ["wwo_KPI_GHG_dis","wwo_KPI_GHG_unt_opd"],
-  };
-
-  const aliases = {
-    offsite_collection: ["offsite_collection","collection_offsite","offsite collection","collection (offsite)"],
-    offsite_transport : ["offsite_transport","transport_offsite","offsite transport","transport (offsite)"],
-    offsite_treatment : ["offsite_treatment","treatment_offsite","offsite treatment","treatment (offsite)"],
-    onsite_containment: ["onsite_containment","containment_onsite","onsite containment","containment (onsite)"],
-    onsite_emptying   : ["onsite_emptying","emptying_onsite","onsite emptying","emptying (onsite)"],
-    onsite_treatment  : ["onsite_treatment","treatment_onsite","onsite treatment","treatment (onsite)"],
-    onsite_discharge  : ["onsite_discharge","discharge_onsite","onsite discharge","discharge (onsite)"],
-  };
-
-  const seenExact = new Set();
-
-  const asNum = (v)=>{
-    if(typeof v === "number") return isFinite(v) ? v : NaN;
-    if(typeof v === "string"){
-      const n = Number(String(v).replace(/,/g,''));
-      return isFinite(n) ? n : NaN;
-    }
-    return NaN;
-  };
-
-  const extractMaybeTotal = (v)=>{
-    const n = asNum(v);
-    if(isFinite(n)) return n;
-    if(v && typeof v === "object"){
-      if(Object.prototype.hasOwnProperty.call(v,'total')){
-        const t = asNum(v.total);
-        if(isFinite(t)) return t;
-      }
-      if(Object.prototype.hasOwnProperty.call(v,'value')){
-        const m = asNum(v.value);
-        if(isFinite(m)) return m;
-      }
-    }
-    return NaN;
-  };
-
-  const walkExact = (node, path)=>{
-    if(node===null || node===undefined) return;
-    if(Array.isArray(node)){
-      node.forEach((item,idx)=>walkExact(item, path+'['+idx+']'));
-      return;
-    }
-    if(typeof node !== 'object') return;
-
-    for(const key in node){
-      if(!Object.prototype.hasOwnProperty.call(node,key)) continue;
-      const val = node[key];
-      const childPath = path ? (path + '.' + key) : key;
-
-      for(const groupKey in exactGroups){
-        if(exactGroups[groupKey].includes(key)){
-          const value = extractMaybeTotal(val);
-          const sig = groupKey+'|'+childPath;
-          if(isFinite(value) && !seenExact.has(sig)){
-            found[groupKey] += value;
-            seenExact.add(sig);
-          }
-        }
-      }
-
-      walkExact(val, childPath);
-    }
-  };
-
-  walkExact(root, '$');
-
-  const exactTotal = Object.keys(found).map(k=>Number(found[k]||0)).reduce((a,b)=>a+b,0);
-  if(exactTotal > 0){
-    found.total_offsite = found.offsite_collection + found.offsite_transport + found.offsite_treatment;
-    found.total_onsite  = found.onsite_containment + found.onsite_emptying + found.onsite_treatment + found.onsite_discharge;
-    found.total         = found.total_offsite + found.total_onsite;
-    return found;
-  }
-
+  const found = {};
   const flat = [];
+
   const pushFlat = (k, v, path, label)=>{
-    const num = asNum(v);
+    const num = (typeof v === "number") ? v : (typeof v === "string" ? Number(v) : NaN);
     if(!isFinite(num)) return;
     flat.push({k:String(k||""), label:String(label||""), path:String(path||""), v:num});
   };
-  const walkLoose = (node, path)=>{
+
+  const walk = (node, path)=>{
     if(node===null || node===undefined) return;
     if(Array.isArray(node)){
-      for(let i=0;i<node.length;i++) walkLoose(node[i], path+"["+i+"]");
+      for(let i=0;i<node.length;i++) walk(node[i], path+"["+i+"]");
       return;
     }
     if(typeof node === "object"){
@@ -716,93 +634,57 @@ extract_ecam_components_from_json(root, rawText){
         if(!Object.prototype.hasOwnProperty.call(node,key)) continue;
         const val = node[key];
         pushFlat(key, val, path+"."+key, "");
-        if(val && typeof val === 'object' && Object.prototype.hasOwnProperty.call(val,'total')) pushFlat(key, val.total, path+"."+key+".total", "");
-        walkLoose(val, path+"."+key);
+        walk(val, path+"."+key);
       }
     }
   };
-  walkLoose(root, "$");
 
-  const scoreItem = (item, aliasList, needOffsite, needOnsite)=>{
+  walk(root, "$");
+
+  const score = (item, needOffsite, needOnsite, kw)=>{
     const s = (item.k+" "+item.label+" "+item.path).toLowerCase();
     let sc = 0;
-    aliasList.forEach(a=>{
-      const kw = String(a).toLowerCase();
-      if(s.includes(kw)) sc += 25;
-      if(item.k.toLowerCase()===kw) sc += 40;
-      if(item.label.toLowerCase()===kw) sc += 20;
-    });
-    if(needOffsite && (s.includes("offsite") || s.includes("off-site"))) sc += 20;
-    if(needOnsite  && (s.includes("onsite")  || s.includes("on-site")))  sc += 20;
-    if(s.includes("ghg")) sc += 25;
-    if(s.includes("co2eq")) sc += 25;
-    if(s.includes("co2")) sc += 15;
-    if(s.includes("emission")) sc += 20;
-    if(s.includes("kpi")) sc += 15;
-    if(s.includes("result")) sc += 15;
-    if(s.includes("summary")) sc += 10;
-    if(s.includes("inventory")) sc -= 20;
-    if(s.includes("population")) sc -= 15;
-    if(s.includes("energy")) sc -= 15;
-    if(s.includes("nrg")) sc -= 15;
+    if(kw && s.includes(kw)) sc += 5;
+    if(needOffsite && (s.includes("offsite") || s.includes("off-site"))) sc += 3;
+    if(needOnsite  && (s.includes("onsite")  || s.includes("on-site"))) sc += 3;
     return sc;
   };
 
-  const pickFromFlat = (aliasList, needOffsite, needOnsite)=>{
-    let best = null, bestScore = -1;
-    for(const item of flat){
-      const sc = scoreItem(item, aliasList, needOffsite, needOnsite);
-      if(sc > bestScore || (sc===bestScore && best && item.v > best.v)){
-        bestScore = sc;
-        best = item;
+  const pick = (aliases, needOffsite, needOnsite)=>{
+    let best = null;
+    let bestScore = -1;
+    for(const a of aliases){
+      const kw = String(a).toLowerCase();
+      for(const item of flat){
+        const sc = score(item, needOffsite, needOnsite, kw);
+        if(sc > bestScore){
+          bestScore = sc;
+          best = item;
+        }
       }
     }
-    return (best && bestScore >= 25) ? Number(best.v||0) : 0;
+    if(best && bestScore >= 5) return best.v;
+    for(const item of flat){
+      const key = item.k.toLowerCase();
+      for(const a of aliases){
+        if(key === String(a).toLowerCase()) return item.v;
+      }
+    }
+    return 0;
   };
 
-  const escapeRe = (s)=>String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pickFromRaw = (aliasList)=>{
-    const txt = String(rawText || "");
-    if(!txt) return 0;
-    let best = {score:-1, value:0};
-    aliasList.forEach(alias=>{
-      const a = escapeRe(alias);
-      const patterns = [
-        new RegExp('"'+a+'"\s*:\s*([-]?[0-9][0-9,]*(?:\.[0-9]+)?)','ig'),
-        new RegExp('"'+a+'"[^\n\r]{0,180}?"value"\s*:\s*([-]?[0-9][0-9,]*(?:\.[0-9]+)?)','ig'),
-        new RegExp('"label"\s*:\s*"'+a+'"[^\n\r]{0,180}?"value"\s*:\s*([-]?[0-9][0-9,]*(?:\.[0-9]+)?)','ig'),
-      ];
-      patterns.forEach((re, idx)=>{
-        let m;
-        while((m = re.exec(txt))){
-          const v = Number(String(m[1]).replace(/,/g,''));
-          if(!isFinite(v)) continue;
-          const around = txt.slice(Math.max(0, m.index-120), Math.min(txt.length, m.index+240)).toLowerCase();
-          let sc = 20 - idx;
-          if(around.includes("ghg")) sc += 20;
-          if(around.includes("co2eq")) sc += 20;
-          if(around.includes("emission")) sc += 15;
-          if(around.includes("result")) sc += 10;
-          if(sc > best.score || (sc===best.score && v > best.value)) best = {score:sc, value:v};
-        }
-      });
-    });
-    return best.score >= 20 ? best.value : 0;
-  };
-
-  const pick = (aliasList, needOffsite, needOnsite)=>Math.max(Number(pickFromFlat(aliasList, needOffsite, needOnsite)||0), Number(pickFromRaw(aliasList)||0));
-
-  found.offsite_collection = pick(aliases.offsite_collection, true, false);
-  found.offsite_transport  = pick(aliases.offsite_transport, true, false);
-  found.offsite_treatment  = pick(aliases.offsite_treatment, true, false);
-  found.onsite_containment = pick(aliases.onsite_containment, false, true);
-  found.onsite_emptying    = pick(aliases.onsite_emptying, false, true);
-  found.onsite_treatment   = pick(aliases.onsite_treatment, false, true);
-  found.onsite_discharge   = pick(aliases.onsite_discharge, false, true);
+  found.offsite_collection = pick(targets.offsite_collection, true, false);
+  found.offsite_transport  = pick(targets.offsite_transport,  true, false);
+  found.offsite_treatment  = pick(targets.offsite_treatment,  true, false);
+  found.onsite_containment = pick(targets.onsite_containment, false, true);
+  found.onsite_emptying    = pick(targets.onsite_emptying,    false, true);
+  found.onsite_treatment   = pick(targets.onsite_treatment,   false, true);
+  found.onsite_discharge   = pick(targets.onsite_discharge,   false, true);
 
   found.total_offsite = found.offsite_collection + found.offsite_transport + found.offsite_treatment;
   found.total_onsite  = found.onsite_containment + found.onsite_emptying + found.onsite_treatment + found.onsite_discharge;
   found.total         = found.total_offsite + found.total_onsite;
+
   return found;
 },
 
