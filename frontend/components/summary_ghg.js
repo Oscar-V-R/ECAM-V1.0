@@ -41,6 +41,7 @@ let summary_ghg=new Vue({
     compare_total_future:0,
     compare_total_diff:0,
     compare_total_pct:null,
+    compare_export_mode:"full",
 
     //current emissions unit
     current_unit_ghg:"kgCO2eq",
@@ -1853,11 +1854,23 @@ draw_compare_pies(b,f){
       <button type="button" @click.prevent="generate_compare_from_uploads()" :disabled="!compare_baseline_json || !compare_future_json">Generate comparison</button>
     </div>
 
+    <div v-if="compare_rows && compare_rows.length" style="display:flex; gap:.5em; justify-content:flex-end; align-items:center; margin-top:.75em; flex-wrap:wrap;">
+      <label for="compare_export_mode" style="font-weight:600;">Export section</label>
+      <select id="compare_export_mode" v-model="compare_export_mode" style="padding:.35em .5em; border:1px solid #ccc; border-radius:4px; min-width:220px;">
+        <option value="full">Full comparison</option>
+        <option value="summary">Comparison summary</option>
+        <option value="baseline">Baseline scenario</option>
+        <option value="future">Future scenario</option>
+      </select>
+      <button type="button" @click.prevent="download_compare_jpg()">Download JPG</button>
+    </div>
+
     <div v-if="compare_error" style="margin-top:.75em; color:#b91c1c; font-weight:600;">
       {{compare_error}}
     </div>
 
-    <div v-if="compare_rows && compare_rows.length" style="margin-top:1.25em;">
+    <div v-if="compare_rows && compare_rows.length" id="compare_export_full" style="margin-top:1.25em;">
+      <div id="compare_export_summary">
       <div style="font-weight:700; color:var(--color-level-generic); margin-bottom:.5em;">Comparison table</div>
       <table class="legend" style="width:100%;">
         <tr style="font-weight:700;">
@@ -1931,8 +1944,10 @@ draw_compare_pies(b,f){
         </div>
       </div>
 
+</div>
+
 <div class="compare-scenario-grid" style="margin-top:1.25em;">
-  <div style="border:1px solid #eee; padding:1em;">
+  <div id="compare_export_baseline" style="border:1px solid #eee; padding:1em;">
     <div style="font-weight:700; margin-bottom:.75em;">Baseline scenario</div>
     <div style="color:var(--color-level-generic); font-size:large; font-weight:bold; margin-bottom:.75em;">Emissions summary</div>
 
@@ -1968,7 +1983,7 @@ draw_compare_pies(b,f){
     </div>
   </div>
 
-  <div style="border:1px solid #eee; padding:1em;">
+  <div id="compare_export_future" style="border:1px solid #eee; padding:1em;">
     <div style="font-weight:700; margin-bottom:.75em;">Future scenario (2040)</div>
     <div style="color:var(--color-level-generic); font-size:large; font-weight:bold; margin-bottom:.75em;">Emissions summary</div>
 
