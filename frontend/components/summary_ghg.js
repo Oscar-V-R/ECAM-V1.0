@@ -415,6 +415,66 @@ on_sfd_file_change(ev){
       }
     }
 ,
+    async download_compare_jpg(){
+      try{
+        await this.ensure_html2canvas();
+
+        const map = {
+          full: "compare_export_full",
+          summary: "compare_export_summary",
+          baseline: "compare_export_baseline",
+          future: "compare_export_future",
+        };
+
+        const mode = String(this.compare_export_mode || "full");
+        const targetId = map[mode] || "compare_export_full";
+        const el = document.getElementById(targetId);
+
+        if(!el){
+          alert("Selected export section not found.");
+          return;
+        }
+
+        const previousShadow = el.style.boxShadow;
+        const previousBg = el.style.backgroundColor;
+        el.style.backgroundColor = "#ffffff";
+        el.style.boxShadow = "none";
+
+        const canvas = await window.html2canvas(el, {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          scrollX: 0,
+          scrollY: -window.scrollY,
+          windowWidth: document.documentElement.clientWidth,
+          windowHeight: document.documentElement.clientHeight,
+        });
+
+        el.style.boxShadow = previousShadow;
+        el.style.backgroundColor = previousBg;
+
+        canvas.toBlob((blob)=>{
+          if(!blob){
+            alert("Export failed.");
+            return;
+          }
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "ecam_sfd_compare_" + mode + ".jpg";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url), 1500);
+        }, "image/jpeg", 0.92);
+      }catch(err){
+        console.error(err);
+        alert("Could not export comparison JPG.");
+      }
+    },
+
 
 
 compare_baseline_emissions(){
