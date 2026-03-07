@@ -272,7 +272,7 @@ let summary_ghg=new Vue({
         const snap = this.snapshot_sfd_state();
         localStorage.setItem(this.sfd_ls_key("future"), JSON.stringify(snap));
         this.sfd_compare_future = snap;
-        this.sfd_set_status("Future (2040) saved.");
+        this.sfd_set_status("Future saved.");
       }catch(e){
         console.warn(e);
         alert("Could not save future snapshot.");
@@ -423,8 +423,8 @@ on_sfd_file_change(ev){
           full: "compare_export_full",
           summary: "compare_export_summary",
           table: "compare_export_table",
-          baseline: "compare_export_baseline",
-          future: "compare_export_future",
+          baseline: "compare_export_pair_baseline",
+          future: "compare_export_pair_future",
           pair: "compare_export_pair",
         };
 
@@ -1857,7 +1857,7 @@ draw_compare_pies(b,f){
 
 <div v-if="current_view=='sfd_compare'">
   <div class="chart_container" style="margin-top:1em;">
-    <div class="chart_title">SFD comparison (Baseline vs Future 2040)</div>
+    <div class="chart_title">SFD comparison (Baseline vs Future)</div>
 
     <div style="display:grid; grid-template-columns:50% 50%; gap:1em; margin-top:1em; align-items:start;">
       <div style="border:1px solid #ddd; padding:1em;">
@@ -1876,7 +1876,7 @@ draw_compare_pies(b,f){
       </div>
 
       <div style="border:1px solid #ddd; padding:1em;">
-        <div style="font-weight:700; margin-bottom:.5em;">Future scenario (2040)</div>
+        <div style="font-weight:700; margin-bottom:.5em;">Future scenario</div>
         <div style="margin-bottom:.75em;">
           <b>Upload ECAM JSON</b><br>
           <input type="file" accept=".json,application/json" @change="on_compare_json_upload('future',$event)">
@@ -2042,7 +2042,7 @@ draw_compare_pies(b,f){
   </div>
 
   <div id="compare_export_future" style="border:1px solid #eee; padding:1em; background:#fff;">
-    <div style="font-weight:700; margin-bottom:.75em;">Future scenario (2040)</div>
+    <div style="font-weight:700; margin-bottom:.75em;">Future scenario</div>
     <div style="display:grid; grid-template-columns:minmax(0,55%) minmax(0,45%); gap:1em; align-items:start;">
       <div>
         <div style="color:var(--color-level-generic); font-size:large; font-weight:bold; margin-bottom:.75em;">Emissions summary</div>
@@ -2091,7 +2091,7 @@ draw_compare_pies(b,f){
 </div>
 
 <div id="compare_export_pair" style="margin-top:1.25em; display:grid; grid-template-columns:1fr; gap:1em;">
-  <div style="border:1px solid #eee; padding:1em; background:#fff;">
+  <div id="compare_export_pair_baseline" style="border:1px solid #eee; padding:1em; background:#fff;">
     <div style="font-weight:700; margin-bottom:.75em;">Baseline scenario</div>
     <div style="display:grid; grid-template-columns:minmax(0,55%) minmax(0,45%); gap:1em; align-items:start;">
       <div>
@@ -2135,8 +2135,8 @@ draw_compare_pies(b,f){
     </div>
   </div>
 
-  <div style="border:1px solid #eee; padding:1em; background:#fff;">
-    <div style="font-weight:700; margin-bottom:.75em;">Future scenario (2040)</div>
+  <div id="compare_export_pair_future" style="border:1px solid #eee; padding:1em; background:#fff;">
+    <div style="font-weight:700; margin-bottom:.75em;">Future scenario</div>
     <div style="display:grid; grid-template-columns:minmax(0,55%) minmax(0,45%); gap:1em; align-items:start;">
       <div>
         <div style="color:var(--color-level-generic); font-size:large; font-weight:bold; margin-bottom:.75em;">Emissions summary</div>
